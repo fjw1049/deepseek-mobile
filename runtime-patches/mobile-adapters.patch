@@ -1,0 +1,3532 @@
+diff --git a/packages/workbench/src/main/services/git-service.integration.test.ts b/packages/workbench/src/main/services/git-service.integration.test.ts
+index 64d10581..9552ae89 100644
+--- a/packages/workbench/src/main/services/git-service.integration.test.ts
++++ b/packages/workbench/src/main/services/git-service.integration.test.ts
+@@ -5,6 +5,7 @@ import { join } from 'node:path'
+ import { describe, expect, it } from 'vitest'
+ import {
+   getGitBranches,
++  getGitFileDiff,
+   getGitHubRepository,
+   getGitLog,
+   getGitWorkingChanges,
+@@ -22,6 +23,48 @@ import {
+ const REPO_ROOT = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim()
+ 
+ describe('git-service integration', () => {
++  it('supports status, layered diffs, unstage and first commit before HEAD exists', async () => {
++    const repo = mkdtempSync(join(tmpdir(), 'deepseek-git-unborn-'))
++    const git = (...args: string[]): string =>
++      execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim()
++    try {
++      git('init', '-b', 'main')
++      git('config', 'user.name', 'Workbench Test')
++      git('config', 'user.email', 'workbench@example.test')
++      expect(await getGitBranches(repo)).toMatchObject({ ok: true, currentBranch: 'main', dirtyCount: 0 })
++      expect(await getGitWorkingChanges(repo)).toMatchObject({ ok: true, files: [] })
++      writeFileSync(join(repo, 'first.txt'), 'staged first version\n')
++      expect(await getGitBranches(repo)).toMatchObject({ ok: true, dirtyCount: 1 })
++      const untracked = await getGitWorkingChanges(repo)
++      expect(untracked.ok && untracked.files[0]?.patch).toContain('+staged first version')
++      expect(await stageGitChanges(repo, ['first.txt'])).toMatchObject({ ok: true, fileCount: 1 })
++      expect(await unstageGitChanges(repo, ['first.txt'])).toMatchObject({ ok: true, fileCount: 1 })
++      expect(git('ls-files')).toBe('')
++      expect(await stageGitChanges(repo, ['first.txt'])).toMatchObject({ ok: true })
++      writeFileSync(join(repo, 'first.txt'), 'working first version\n')
++      const changes = await getGitWorkingChanges(repo)
++      expect(changes.ok).toBe(true)
++      if (!changes.ok) return
++      expect(changes.files[0]?.patch).toContain('+working first version')
++      expect(changes.stagedFiles?.[0]?.patch).toContain('+staged first version')
++      expect(changes.unstagedFiles?.[0]?.patch).toContain('-staged first version')
++      for (const scope of ['working-tree', 'staged', 'branch'] as const) {
++        const diff = await getGitFileDiff({ workspaceRoot: repo, path: 'first.txt', scope })
++        expect(diff.ok && diff.patch).toContain(scope === 'staged' ? '+staged first version' : '+working first version')
++      }
++      const branch = await getGitWorkingChanges(repo, 'branch')
++      expect(branch.ok && branch.files[0]?.patch).toContain('+working first version')
++      expect(await commitGitChanges(repo, 'first commit')).toMatchObject({ ok: true })
++      expect(git('show', 'HEAD:first.txt')).toBe('staged first version')
++      expect(git('rev-list', '--count', 'HEAD')).toBe('1')
++      const after = await getGitWorkingChanges(repo)
++      expect(after.ok && after.files[0]?.patch).toContain('-staged first version')
++      expect(await getGitBranches(repo)).toMatchObject({ ok: true, currentBranch: 'main' })
++    } finally {
++      rmSync(repo, { recursive: true, force: true })
++    }
++  })
++
+   it('getGitWorkingChanges returns files when branches report dirty count', async () => {
+     const branches = await getGitBranches(REPO_ROOT)
+     expect(branches.ok).toBe(true)
+diff --git a/packages/workbench/src/main/services/git-service.ts b/packages/workbench/src/main/services/git-service.ts
+index aae6dfe3..79e1e6f6 100644
+--- a/packages/workbench/src/main/services/git-service.ts
++++ b/packages/workbench/src/main/services/git-service.ts
+@@ -267,6 +267,7 @@ async function resolveRecentAncestorBranch(
+     : defaultBranch
+   if (currentBranch === defaultLocalName) return null
+ 
++  if (!(await gitRefExists(cwd, 'HEAD'))) return null
+   const headCommit = (await runGit(cwd, ['rev-parse', 'HEAD'])).stdout.trim()
+   const merged = await listLocalBranches(cwd, true)
+   const recent = merged.find(
+@@ -561,13 +562,27 @@ async function buildLayerFiles(
+   return files.sort((a, b) => a.path.localeCompare(b.path))
+ }
+ 
++// An unborn branch has no HEAD tree. Ask Git for its empty-tree object ID
++// instead of hard-coding SHA-1, so SHA-256 repositories work as well.
++async function resolveWorkingTreeBase(cwd: string): Promise<string> {
++  if (await gitRefExists(cwd, 'HEAD')) return 'HEAD'
++  await runGit(cwd, ['symbolic-ref', '--quiet', 'HEAD'])
++  const pending = execFileAsync('git', ['hash-object', '-t', 'tree', '--stdin'], {
++    cwd,
++    timeout: 10_000
++  })
++  pending.child.stdin?.end()
++  return String((await pending).stdout).trim()
++}
++
+ async function buildCombinedFiles(
+   cwd: string,
+   entries: ParsedPorcelainEntry[],
+   readUntracked = untrackedPatch
+ ): Promise<GitWorkingChangeFile[]> {
+   if (entries.length === 0) return []
+-  const trackedDiff = await runGitStdout(cwd, ['diff', 'HEAD', '--no-color'], {
++  const base = await resolveWorkingTreeBase(cwd)
++  const trackedDiff = await runGitStdout(cwd, ['diff', base, '--no-color'], {
+     timeout: 30_000,
+     maxBuffer: DIFF_MAX_BUFFER,
+     allowNonZero: true
+@@ -581,7 +596,7 @@ async function buildCombinedFiles(
+         entry.status === 'untracked'
+           ? await readUntracked(cwd, entry.path)
+           : patchByPath.get(entry.path) ??
+-            (await runGitStdout(cwd, ['diff', 'HEAD', '--no-color', '--', entry.path], {
++            (await runGitStdout(cwd, ['diff', base, '--no-color', '--', entry.path], {
+               timeout: 20_000,
+               maxBuffer: DIFF_MAX_BUFFER,
+               allowNonZero: true
+@@ -638,7 +653,8 @@ async function resolveBranchBase(
+       // Try the next conventional base.
+     }
+   }
+-  return { baseRef: 'HEAD', baseCommit: 'HEAD' }
++  const baseCommit = await resolveWorkingTreeBase(cwd)
++  return { baseRef: baseCommit === 'HEAD' ? 'HEAD' : 'empty tree', baseCommit }
+ }
+ 
+ function parseNameStatus(raw: string): Array<{ path: string; status: GitWorkingChangeStatus }> {
+@@ -831,7 +847,7 @@ export async function getGitFileDiff(target: GitFileDiffTarget): Promise<GitFile
+     }
+     const args = ['--literal-pathspecs', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--unified=2147483647']
+     if (target.scope === 'staged') args.push('--cached')
+-    else if (target.scope === 'working-tree') args.push('HEAD')
++    else if (target.scope === 'working-tree') args.push(await resolveWorkingTreeBase(repositoryRoot))
+     else if (target.scope === 'branch') args.push((await resolveBranchBase(repositoryRoot, target.baseRef)).baseCommit)
+     let patch = await runGitStdout(repositoryRoot, [...args, '--', ...paths], {
+       timeout: 20_000,
+diff --git a/packages/workbench/src/main/services/terminal-service.ts b/packages/workbench/src/main/services/terminal-service.ts
+index 303787e1..32d7a68a 100644
+--- a/packages/workbench/src/main/services/terminal-service.ts
++++ b/packages/workbench/src/main/services/terminal-service.ts
+@@ -1,250 +1,21 @@
+ import { BrowserWindow } from 'electron'
+-import { existsSync } from 'node:fs'
+-import { stat } from 'node:fs/promises'
+-import { resolve } from 'node:path'
+-import { spawn as spawnPty, type IPty } from 'node-pty'
+-import { randomUUID } from 'node:crypto'
+-import type {
+-  TerminalCreateOptions,
+-  TerminalCreateResult,
+-  TerminalDataPayload,
+-  TerminalExitPayload,
+-  TerminalInputPayload,
+-  TerminalLifecyclePayload,
+-  TerminalResizePayload
+-} from '../../shared/terminal-session'
++import { createTerminalCore } from './terminal-core'
+ import { expandHomePath } from './workspace-service'
+ 
+-type TerminalSessionState = {
+-  id: string
+-  windowId: number
+-  pty: IPty
+-  pendingData: string
+-  flushTimer: ReturnType<typeof setTimeout> | null
+-}
+-
+-const TERMINAL_DATA_FLUSH_MS = 16
+-
+-function resolveTerminalShell(): { file: string; args: string[]; name: string } {
+-  if (process.platform === 'win32') {
+-    const file = process.env.COMSPEC?.trim() || 'cmd.exe'
+-    return { file, args: [], name: 'xterm-color' }
+-  }
+-
+-  const shellPath = process.env.SHELL?.trim() || ''
+-
+-  if (shellPath && existsSync(shellPath)) {
+-    return { file: shellPath, args: ['-l'], name: 'xterm-256color' }
+-  }
+-
+-  if (process.platform === 'darwin') {
+-    if (existsSync('/bin/zsh')) return { file: '/bin/zsh', args: ['-l'], name: 'xterm-256color' }
+-    if (existsSync('/bin/bash')) return { file: '/bin/bash', args: ['-l'], name: 'xterm-256color' }
+-  }
+-
+-  if (existsSync('/bin/bash')) return { file: '/bin/bash', args: ['-l'], name: 'xterm-256color' }
+-  if (existsSync('/bin/sh')) return { file: '/bin/sh', args: ['-l'], name: 'xterm-256color' }
+-
+-  return { file: shellPath || '/bin/bash', args: ['-l'], name: 'xterm-256color' }
+-}
+-
+-function normalizeTerminalDimension(value: number | undefined, fallback: number, minimum = 2): number {
+-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+-  return Math.max(minimum, Math.floor(value))
+-}
+-
+-async function resolveTerminalCwd(raw: string): Promise<string> {
+-  const target = resolve(expandHomePath(raw))
+-  const info = await stat(target)
+-  if (!info.isDirectory()) {
+-    throw new Error(`Not a directory: ${raw}`)
+-  }
+-  return target
+-}
+-
++// Electron owns windows; the PTY lifecycle is shared with the mobile Companion.
+ export function createTerminalService() {
+-  const terminalSessions = new Map<string, TerminalSessionState>()
+-
+-  function sendTerminalEvent(
+-    windowId: number,
+-    channel: 'terminal:data',
+-    payload: TerminalDataPayload
+-  ): boolean
+-  function sendTerminalEvent(
+-    windowId: number,
+-    channel: 'terminal:exit',
+-    payload: TerminalExitPayload
+-  ): boolean
+-  function sendTerminalEvent(
+-    windowId: number,
+-    channel: 'terminal:data' | 'terminal:exit',
+-    payload: TerminalDataPayload | TerminalExitPayload
+-  ): boolean {
+-    const window = BrowserWindow.fromId(windowId)
+-    if (!window || window.isDestroyed()) return false
+-    const contents = window.webContents
+-    if (contents.isDestroyed()) return false
+-    try {
+-      contents.send(channel, payload)
+-      return true
+-    } catch {
+-      return false
+-    }
+-  }
+-
+-  function disposeTerminalSession(sessionId: string): boolean {
+-    const session = terminalSessions.get(sessionId)
+-    if (!session) return false
+-    terminalSessions.delete(sessionId)
+-    if (session.flushTimer) {
+-      clearTimeout(session.flushTimer)
+-      session.flushTimer = null
+-    }
+-    session.pendingData = ''
+-    try {
+-      session.pty.kill()
+-    } catch {
+-      /* ignore cleanup failures */
+-    }
+-    return true
+-  }
+-
+-  function flushTerminalSessionData(sessionId: string): boolean {
+-    const session = terminalSessions.get(sessionId)
+-    if (!session) return false
+-    if (session.flushTimer) {
+-      clearTimeout(session.flushTimer)
+-      session.flushTimer = null
+-    }
+-    if (!session.pendingData) return true
+-    const data = session.pendingData
+-    session.pendingData = ''
+-    if (!sendTerminalEvent(session.windowId, 'terminal:data', { sessionId, data })) {
+-      disposeTerminalSession(sessionId)
+-      return false
+-    }
+-    return true
+-  }
+-
+-  function scheduleTerminalSessionFlush(sessionId: string): void {
+-    const session = terminalSessions.get(sessionId)
+-    if (!session || session.flushTimer) return
+-    session.flushTimer = setTimeout(() => {
+-      const next = terminalSessions.get(sessionId)
+-      if (!next) return
+-      next.flushTimer = null
+-      void flushTerminalSessionData(sessionId)
+-    }, TERMINAL_DATA_FLUSH_MS)
+-  }
+-
+-  function disposeTerminalSessionsForWindow(windowId: number): void {
+-    for (const [sessionId, session] of terminalSessions.entries()) {
+-      if (session.windowId === windowId) {
+-        disposeTerminalSession(sessionId)
+-      }
+-    }
+-  }
+-
+-  async function createTerminalSession(
+-    sender: Electron.WebContents,
+-    options: TerminalCreateOptions
+-  ): Promise<TerminalCreateResult> {
+-    try {
+-      const cwd = await resolveTerminalCwd(options.cwd)
+-      const windowId = BrowserWindow.fromWebContents(sender)?.id
+-      if (!windowId) {
+-        throw new Error('Could not resolve the current window.')
+-      }
+-
+-      const shellConfig = resolveTerminalShell()
+-      const sessionId = randomUUID()
+-      const cols = normalizeTerminalDimension(options.cols, 120)
+-      const rows = normalizeTerminalDimension(options.rows, 32, 1)
+-      const env = {
+-        ...process.env,
+-        TERM: shellConfig.name,
+-        COLORTERM: 'truecolor',
+-        // Apps launched from Finder/Dock get no locale; without it the shell
+-        // falls back to C and mangles CJK/Unicode output.
+-        ...(process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE ? {} : { LANG: 'en_US.UTF-8' })
+-      }
+-
+-      const pty = spawnPty(shellConfig.file, shellConfig.args, {
+-        name: shellConfig.name,
+-        cwd,
+-        cols,
+-        rows,
+-        env
+-      })
+-
+-      terminalSessions.set(sessionId, {
+-        id: sessionId,
+-        windowId,
+-        pty,
+-        pendingData: '',
+-        flushTimer: null
+-      })
+-
+-      pty.onData((data) => {
+-        const session = terminalSessions.get(sessionId)
+-        if (!session) return
+-        session.pendingData += data
+-        scheduleTerminalSessionFlush(sessionId)
+-      })
+-
+-      pty.onExit(({ exitCode, signal }) => {
+-        flushTerminalSessionData(sessionId)
+-        const session = terminalSessions.get(sessionId)
+-        if (session?.flushTimer) {
+-          clearTimeout(session.flushTimer)
+-          session.flushTimer = null
+-        }
+-        terminalSessions.delete(sessionId)
+-        sendTerminalEvent(windowId, 'terminal:exit', { sessionId, exitCode, signal })
+-      })
+-
+-      return {
+-        ok: true,
+-        session: {
+-          id: sessionId,
+-          cwd,
+-          shell: shellConfig.file
+-        }
+-      }
+-    } catch (error) {
+-      return {
+-        ok: false,
+-        message: error instanceof Error ? error.message : String(error)
++  return createTerminalCore<Electron.WebContents>({
++    ownerId: sender => BrowserWindow.fromWebContents(sender)?.id,
++    expandPath: expandHomePath,
++    send: (windowId, channel, payload) => {
++      const window = BrowserWindow.fromId(windowId)
++      if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return false
++      try {
++        window.webContents.send(channel, payload)
++        return true
++      } catch {
++        return false
+       }
+     }
+-  }
+-
+-  function writeTerminalSession(payload: TerminalInputPayload): boolean {
+-    const session = terminalSessions.get(payload.sessionId)
+-    if (!session) return false
+-    session.pty.write(payload.data)
+-    return true
+-  }
+-
+-  function resizeTerminalSession(payload: TerminalResizePayload): boolean {
+-    const session = terminalSessions.get(payload.sessionId)
+-    if (!session) return false
+-    session.pty.resize(
+-      normalizeTerminalDimension(payload.cols, session.pty.cols),
+-      normalizeTerminalDimension(payload.rows, session.pty.rows, 1)
+-    )
+-    return true
+-  }
+-
+-  function closeTerminalSession(payload: TerminalLifecyclePayload): boolean {
+-    return disposeTerminalSession(payload.sessionId)
+-  }
+-
+-  return {
+-    createTerminalSession,
+-    writeTerminalSession,
+-    resizeTerminalSession,
+-    closeTerminalSession,
+-    disposeTerminalSessionsForWindow
+-  }
++  })
+ }
+diff --git a/src/deepseek_tui/server/app.py b/src/deepseek_tui/server/app.py
+index 08d9d208..e64c8e89 100644
+--- a/src/deepseek_tui/server/app.py
++++ b/src/deepseek_tui/server/app.py
+@@ -60,6 +60,9 @@ def attach_runtime_api(
+         }
+ 
+     app.include_router(build_runtime_api_router())
++    from deepseek_tui.mobile import attach_mobile_api
++
++    attach_mobile_api(app)
+     app.add_middleware(RuntimeAuthMiddleware, auth_token=auth_token)
+     if cors_origins:
+         attach_cors(app, cors_origins)
+@@ -535,6 +538,9 @@ def build_fastapi_app(
+             await app.state.thread_manager.reclaim_idle_worktrees()
+             yield
+         finally:
++            from deepseek_tui.mobile import close_mobile_services
++
++            await close_mobile_services(app)
+             await app.state.thread_manager.aclose()
+ 
+     app = FastAPI(
+diff --git a/src/deepseek_tui/server/auth.py b/src/deepseek_tui/server/auth.py
+index 4ce18c6b..b330e71b 100644
+--- a/src/deepseek_tui/server/auth.py
++++ b/src/deepseek_tui/server/auth.py
+@@ -2,8 +2,8 @@
+ 
+ from __future__ import annotations
+ 
+-
+-
++import asyncio
++import hmac
+ import os
+ import uuid
+ from dataclasses import dataclass
+@@ -107,9 +107,7 @@ class RuntimeAuthMiddleware(BaseHTTPMiddleware):
+         super().__init__(app)  # type: ignore[arg-type]
+         self._token = (auth_token or "").strip()
+ 
+-    async def dispatch(
+-        self, request: Request, call_next: RequestResponseEndpoint
+-    ) -> Response:
++    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+         if not self._token:
+             return await call_next(request)
+         path = request.url.path
+@@ -118,8 +116,14 @@ class RuntimeAuthMiddleware(BaseHTTPMiddleware):
+         # Default-deny: every other route (including /legacy/*) requires the
+         # bearer token. A /v1-only allowlist previously left the legacy
+         # prompt/tool routes callable by any local process.
++        from deepseek_tui.mobile.devices import PAIR_PATH, device_for_token
++
++        if request.method == "POST" and path == PAIR_PATH:
++            return await call_next(request)
+         token = self._extract_token(request)
+-        if token != self._token:
++        is_admin = bool(token and hmac.compare_digest(token.encode(), self._token.encode()))
++        device = None if is_admin else await asyncio.to_thread(device_for_token, token)
++        if not is_admin and not device:
+             return JSONResponse(
+                 status_code=401,
+                 content={
+@@ -127,7 +131,36 @@ class RuntimeAuthMiddleware(BaseHTTPMiddleware):
+                     "message": "Bearer token required for runtime API routes.",
+                 },
+             )
+-        return await call_next(request)
++        request.state.runtime_role = "admin" if is_admin else "device"
++        request.state.runtime_device = device
++        response = await call_next(request)
++        if device and response.headers.get("content-type", "").startswith("text/event-stream"):
++            original = response.body_iterator
++
++            async def revocable_stream():
++                pending = None
++                try:
++                    while True:
++                        if pending is None:
++                            pending = asyncio.create_task(anext(original))
++                        ready, _ = await asyncio.wait({pending}, timeout=5)
++                        if not await asyncio.to_thread(device_for_token, token):
++                            return
++                        if ready:
++                            try:
++                                chunk = pending.result()
++                            except StopAsyncIteration:
++                                return
++                            pending = None
++                            yield chunk
++                finally:
++                    if pending is not None:
++                        pending.cancel()
++                        await asyncio.gather(pending, return_exceptions=True)
++                    await original.aclose()
++
++            response.body_iterator = revocable_stream()
++        return response
+ 
+     @staticmethod
+     def _extract_token(request: Request) -> str | None:
+diff --git a/src/deepseek_tui/mobile/__init__.py b/src/deepseek_tui/mobile/__init__.py
+new file mode 100644
+index 00000000..f928a829
+--- /dev/null
++++ b/src/deepseek_tui/mobile/__init__.py
+@@ -0,0 +1,18 @@
++"""Mobile transport adapters over the existing Runtime and desktop services."""
++
++from typing import Any
++
++
++def attach_mobile_api(app: Any) -> None:
++    """Mount the mobile adapters without changing their public route paths."""
++    from deepseek_tui.mobile import devices, files, git, models, settings, terminal, voice
++
++    for module in (files, voice, git, terminal, settings, devices, models):
++        app.include_router(module.router)
++
++
++async def close_mobile_services(app: Any) -> None:
++    """Release mobile-owned helpers when the Runtime shuts down."""
++    from deepseek_tui.mobile.terminal import close_mobile_terminals
++
++    await close_mobile_terminals(app)
+diff --git a/src/deepseek_tui/mobile/devices.py b/src/deepseek_tui/mobile/devices.py
+new file mode 100644
+index 00000000..ba2202ad
+--- /dev/null
++++ b/src/deepseek_tui/mobile/devices.py
+@@ -0,0 +1,201 @@
++"""Personal-device pairing; only digests of short-lived codes and tokens persist."""
++
++from __future__ import annotations
++
++import asyncio
++import hashlib
++import hmac
++import json
++import os
++import secrets
++import time
++from contextlib import contextmanager
++
++from fastapi import APIRouter, HTTPException, Request
++
++from deepseek_tui.config.paths import user_deepseek_dir
++from deepseek_tui.utils import write_text_atomic
++from deepseek_tui.workspace.project_lease import FileLease
++
++router = APIRouter(prefix="/v1/mobile/devices", tags=["mobile-devices"])
++PAIR_PATH = "/v1/mobile/devices/pair"
++CODE_TTL = 300
++MAX_DEVICES = 100
++
++
++def _digest(value: str) -> str:
++    return hashlib.sha256(value.encode()).hexdigest()
++
++
++def _path():
++    return user_deepseek_dir() / "mobile-devices.json"
++
++
++def _load() -> dict:
++    try:
++        data = json.loads(_path().read_text())
++    except FileNotFoundError:
++        return {"devices": [], "codes": [], "attempts": []}
++    except (OSError, ValueError) as exc:
++        raise HTTPException(503, "Device registry unavailable") from exc
++    if not isinstance(data, dict) or any(
++        not isinstance(data.get(k), list) for k in ("devices", "codes", "attempts")
++    ):
++        raise HTTPException(503, "Device registry unavailable")
++    return data
++
++
++def _save(data: dict):
++    path = _path()
++    write_text_atomic(path, json.dumps(data))
++    os.chmod(path, 0o600)
++
++
++@contextmanager
++def _locked():
++    lease = FileLease(user_deepseek_dir() / "locks" / "mobile-devices.lock")
++    lease.acquire_blocking()
++    try:
++        yield _load()
++    finally:
++        lease.release()
++
++
++def device_for_token(token: str | None) -> dict | None:
++    if not token or not token.startswith("dsd_") or len(token) > 200:
++        return None
++    digest = _digest(token)
++    for device in _load()["devices"]:
++        if not device.get("revoked_at") and hmac.compare_digest(
++            device.get("token_hash", ""), digest
++        ):
++            return {key: device[key] for key in ("id", "name", "created_at")}
++    return None
++
++
++def create_code() -> dict:
++    with _locked() as data:
++        now = time.time()
++        data["codes"] = [code for code in data["codes"] if code["expires_at"] > now][-9:]
++        code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(12))
++        expires = now + CODE_TTL
++        data["codes"].append({"hash": _digest(code), "expires_at": expires})
++        _save(data)
++        return {"code": code[:6] + "-" + code[6:], "expires_at": expires}
++
++
++def consume_code(code: str, name: str, address: str) -> dict:
++    with _locked() as data:
++        now = time.time()
++        attempts = [item for item in data["attempts"] if item["at"] > now - 60]
++        ip = _digest(address)
++        if len(attempts) >= 60 or sum(item["ip"] == ip for item in attempts) >= 10:
++            raise HTTPException(429, "Too many pairing attempts; wait one minute")
++        attempts.append({"at": now, "ip": ip})
++        data["attempts"] = attempts
++        data["codes"] = [item for item in data["codes"] if item["expires_at"] > now]
++        normalized = code.strip().upper().replace("-", "")
++        found = next(
++            (
++                item
++                for item in data["codes"]
++                if hmac.compare_digest(item["hash"], _digest(normalized))
++            ),
++            None,
++        )
++        if found is None:
++            _save(data)
++            raise HTTPException(400, "Pairing code is invalid, expired, or already used")
++        active = [item for item in data["devices"] if not item.get("revoked_at")]
++        if len(active) >= MAX_DEVICES:
++            _save(data)
++            raise HTTPException(409, "Device limit reached; revoke an unused device first")
++        token = "dsd_" + secrets.token_urlsafe(32)
++        device = {
++            "id": secrets.token_hex(12),
++            "name": name.strip(),
++            "created_at": now,
++            "revoked_at": None,
++            "token_hash": _digest(token),
++        }
++        if len(data["devices"]) >= MAX_DEVICES:
++            data["devices"] = active
++        data["devices"].append(device)
++        data["codes"].remove(found)
++        _save(data)
++        return {"token": token, "device": {k: v for k, v in device.items() if k != "token_hash"}}
++
++
++def list_devices() -> list[dict]:
++    return [
++        {key: value for key, value in item.items() if key != "token_hash"}
++        for item in _load()["devices"]
++    ]
++
++
++def revoke_device(device_id: str) -> dict:
++    with _locked() as data:
++        device = next((item for item in data["devices"] if item["id"] == device_id), None)
++        if device is None:
++            raise HTTPException(404, "Device not found")
++        device["revoked_at"] = device.get("revoked_at") or time.time()
++        _save(data)
++        return {"revoked": True}
++
++
++def _admin(request: Request):
++    if getattr(request.state, "runtime_role", None) != "admin":
++        raise HTTPException(403, "Only the computer administrator can manage paired devices")
++
++
++@router.post("/pair-codes")
++async def pair_code(request: Request):
++    _admin(request)
++    return await asyncio.to_thread(create_code)
++
++
++@router.post("/pair")
++async def pair(request: Request):
++    if not getattr(request.app.state, "runtime_auth_token", None):
++        raise HTTPException(503, "Enable Runtime authentication before pairing devices")
++    raw = bytearray()
++    async for chunk in request.stream():
++        if len(raw) + len(chunk) > 2048:
++            raise HTTPException(413, "Pairing request is too large")
++        raw.extend(chunk)
++    try:
++        body = json.loads(raw)
++    except ValueError as exc:
++        raise HTTPException(400, "Invalid pairing request") from exc
++    if not isinstance(body, dict):
++        raise HTTPException(400, "Invalid pairing request")
++    code, name = body.get("code"), body.get("name")
++    if (
++        not isinstance(code, str)
++        or len(code) > 32
++        or not isinstance(name, str)
++        or not 1 <= len(name.strip()) <= 80
++    ):
++        raise HTTPException(400, "Enter a pairing code and device name (1–80 characters)")
++    address = request.client.host if request.client else "unknown"
++    return await asyncio.to_thread(consume_code, code, name, address)
++
++
++@router.get("/session")
++async def session(request: Request):
++    return {
++        "role": getattr(request.state, "runtime_role", "unsecured"),
++        "device": getattr(request.state, "runtime_device", None),
++    }
++
++
++@router.get("")
++async def devices(request: Request):
++    _admin(request)
++    return await asyncio.to_thread(list_devices)
++
++
++@router.delete("/{device_id}")
++async def revoke(request: Request, device_id: str):
++    _admin(request)
++    return await asyncio.to_thread(revoke_device, device_id)
+diff --git a/src/deepseek_tui/mobile/document_text.py b/src/deepseek_tui/mobile/document_text.py
+new file mode 100644
+index 00000000..d50f883d
+--- /dev/null
++++ b/src/deepseek_tui/mobile/document_text.py
+@@ -0,0 +1,356 @@
++"""Bounded document text previews using the Runtime's existing Office libraries.
++
++No macro execution, external links, formula calculation, OCR, or package installs.
++The caller passes already validated uploaded bytes, never a client-selected path.
++"""
++
++from __future__ import annotations
++
++import importlib.util
++import io
++import json
++import os
++import select
++import shutil
++import stat
++import subprocess
++import sys
++import tempfile
++import time
++import zipfile
++from pathlib import Path
++
++MAX_INPUT = 8 * 1024 * 1024
++MAX_TEXT = 12000
++MAX_ZIP_BYTES = 32 * 1024 * 1024
++MAX_ZIP_ENTRIES = 1500
++FORMATS = {".docx", ".xlsx", ".pptx", ".pdf"}
++
++
++class Preview:
++    def __init__(self):
++        self.parts: list[str] = []
++        self.size = 0
++        self.truncated = False
++
++    def add(self, value: object):
++        line = str(value).strip()
++        if not line:
++            return
++        room = MAX_TEXT - self.size
++        if room <= 0:
++            self.truncated = True
++            return
++        self.parts.append(line[:room])
++        self.size += len(line[:room]) + 1
++        if len(line) > room:
++            self.truncated = True
++
++    @property
++    def full(self):
++        return self.size >= MAX_TEXT
++
++
++def _validate_zip(data: bytes):
++    with zipfile.ZipFile(io.BytesIO(data)) as archive:
++        entries = archive.infolist()
++        if len(entries) > MAX_ZIP_ENTRIES:
++            raise ValueError("Office archive has too many entries")
++        total = 0
++        for info in entries:
++            total += info.file_size
++            if total > MAX_ZIP_BYTES or info.file_size > 16 * 1024 * 1024:
++                raise ValueError("Office archive expanded size exceeds preview limits")
++            if info.flag_bits & 1 or stat.S_ISLNK(info.external_attr >> 16):
++                raise ValueError("Encrypted or symbolic-link Office entries are unsupported")
++            if info.file_size > max(1, info.compress_size) * 1000:
++                raise ValueError("Office archive compression ratio exceeds preview limits")
++            if info.filename.lower().endswith((".xml", ".rels")):
++                # Validate every XML part before the library sees it; no entity expansion.
++                with archive.open(info) as stream:
++                    xml = stream.read(min(info.file_size, 16 * 1024 * 1024) + 1)
++                if len(xml) > info.file_size:
++                    raise ValueError("Office archive size declaration mismatch")
++                lowered = xml.replace(b"\x00", b"").lower()
++                if b"<!doctype" in lowered or b"<!entity" in lowered:
++                    raise ValueError("Office XML document types and entities are unsupported")
++
++
++def _docx(data: bytes, out: Preview):
++    from docx import Document
++
++    document = Document(io.BytesIO(data))
++    # iter_inner_content preserves paragraph/table order in python-docx >= 1.1.
++    from docx.table import Table
++
++    for index, block in enumerate(document.iter_inner_content()):
++        if index >= 500 or out.full:
++            out.truncated = True
++            break
++        if isinstance(block, Table):
++            for row_index, row in enumerate(block.rows):
++                if row_index >= 200 or out.full:
++                    out.truncated = True
++                    break
++                out.add(" | ".join(cell.text for cell in row.cells[:50]))
++                if len(row.cells) > 50:
++                    out.truncated = True
++        else:
++            out.add(block.text)
++
++
++def _xlsx(data: bytes, out: Preview):
++    from openpyxl import load_workbook
++
++    book = load_workbook(io.BytesIO(data), read_only=True, data_only=False, keep_links=False)
++    try:
++        for index, sheet in enumerate(book.worksheets):
++            if index >= 10 or out.full:
++                out.truncated = True
++                break
++            out.add(f"[工作表：{sheet.title}]")
++            # Formulas are shown as text; they are never evaluated.
++            if (sheet.max_row or 0) > 200 or (sheet.max_column or 0) > 50:
++                out.truncated = True
++            for row in sheet.iter_rows(
++                max_row=min(sheet.max_row or 200, 200),
++                max_col=min(sheet.max_column or 50, 50),
++                values_only=True,
++            ):
++                out.add(" | ".join("" if value is None else str(value) for value in row))
++                if out.full:
++                    out.truncated = True
++                    break
++    finally:
++        book.close()
++
++
++def _pptx(data: bytes, out: Preview):
++    from pptx import Presentation
++
++    deck = Presentation(io.BytesIO(data))
++    for index, slide in enumerate(deck.slides):
++        if index >= 50 or out.full:
++            out.truncated = True
++            break
++        out.add(f"[幻灯片 {index + 1}]")
++        for shape_index, shape in enumerate(slide.shapes):
++            if shape_index >= 200 or out.full:
++                out.truncated = True
++                break
++            if shape.has_text_frame:
++                out.add(shape.text_frame.text)
++            if shape.has_table:
++                for row_index, row in enumerate(shape.table.rows):
++                    if row_index >= 200 or out.full:
++                        out.truncated = True
++                        break
++                    out.add(" | ".join(cell.text for cell in list(row.cells)[:50]))
++                    if len(row.cells) > 50:
++                        out.truncated = True
++
++
++def _pdf(data: bytes, out: Preview, executable: str):
++    with tempfile.TemporaryDirectory(prefix="mobile-pdf-preview-") as directory:
++        source = Path(directory) / "input.pdf"
++        source.write_bytes(data)
++        process = subprocess.Popen(
++            [executable, "-f", "1", "-l", "20", "-enc", "UTF-8", str(source), "-"],
++            stdout=subprocess.PIPE,
++            stderr=subprocess.DEVNULL,
++        )
++        captured = bytearray()
++        deadline = time.monotonic() + 10
++        try:
++            assert process.stdout is not None
++            fd = process.stdout.fileno()
++            while True:
++                remaining = deadline - time.monotonic()
++                if remaining <= 0:
++                    raise ValueError("PDF text extraction timed out")
++                ready, _, _ = select.select([fd], [], [], remaining)
++                if not ready:
++                    raise ValueError("PDF text extraction timed out")
++                chunk = os.read(fd, min(8192, MAX_TEXT * 4 + 1 - len(captured)))
++                if not chunk:
++                    break
++                captured.extend(chunk)
++                if len(captured) > MAX_TEXT * 4:
++                    out.truncated = True
++                    break
++            if process.poll() is None and out.truncated:
++                process.kill()
++            code = process.wait(timeout=2)
++            if code and not out.truncated:
++                raise ValueError("PDF may be encrypted or invalid")
++            # pdftotext uses form feeds between pages. We do not inspect beyond 20.
++            decoded = captured.decode("utf-8", errors="replace")
++            if decoded.count("\f") >= 20:
++                out.truncated = True
++            out.add(decoded)
++        finally:
++            if process.poll() is None:
++                process.kill()
++            process.wait()
++            if process.stdout:
++                process.stdout.close()
++
++
++class PdfPreviewError(ValueError):
++    """A fixed, safe diagnostic that may be shown to the user."""
++
++
++def _pdf_library(data: bytes, out: Preview):
++    # Spawn instead of preexec_fn: this function is called from a worker thread.
++    # Resource limits are set inside the child before importing the PDF parser.
++    try:
++        result = subprocess.run(
++            [sys.executable, str(Path(__file__).resolve()), "--pdf-worker"],
++            input=data,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.DEVNULL,
++            timeout=12,
++            check=False,
++        )
++    except subprocess.TimeoutExpired as exc:
++        raise PdfPreviewError("PDF 正文解析超时；文件已保存。") from exc
++    if result.returncode:
++        raise PdfPreviewError("PDF 解析超出资源限制或失败；文件已保存。")
++    payload = json.loads(result.stdout)
++    if payload.get("error"):
++        raise PdfPreviewError(payload["error"])
++    out.add(payload["text"])
++    out.truncated = out.truncated or payload["truncated"]
++
++
++def _pdf_worker() -> dict:
++    import resource
++
++    # Separate process: native parser allocations and decompression cannot OOM
++    # the HTTP Runtime. CPU and wall-clock limits cover malformed page trees.
++    try:
++        resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
++        resource.setrlimit(resource.RLIMIT_DATA, (512 * 1024 * 1024, 512 * 1024 * 1024))
++    except (ValueError, OSError):
++        if sys.platform != "darwin":
++            raise
++        # Darwin rejects finite RLIMIT_AS/RLIMIT_DATA with EINVAL. Watch actual
++        # resident usage there; parser allocation/decompression caps below are
++        # the primary bounds, not an unsupported OS virtual-memory claim.
++        import threading
++
++        def watch_memory():
++            while True:
++                if resource.getrusage(resource.RUSAGE_SELF).ru_maxrss > 512 * 1024 * 1024:
++                    os._exit(70)
++                time.sleep(0.02)
++
++        threading.Thread(target=watch_memory, daemon=True).start()
++    resource.setrlimit(resource.RLIMIT_CPU, (8, 8))
++    from pypdf import PdfReader, overwrite_configuration
++
++    overwrite_configuration(
++        maximum_declared_stream_length=4 * 1024 * 1024,
++        array_based_stream_maximum_output_length=4 * 1024 * 1024,
++        zlib_maximum_output_length=4 * 1024 * 1024,
++        lzw_maximum_output_length=4 * 1024 * 1024,
++        run_length_maximum_output_length=4 * 1024 * 1024,
++        brotli_maximum_output_length=4 * 1024 * 1024,
++        image_maximum_buffer_size=4 * 1024 * 1024,
++        array_maximum_element_count=10000,
++        dictionary_maximum_element_count=10000,
++        stream_decoding_work_maximum_length=16 * 1024 * 1024,
++        stream_parsing_work_maximum_count=100000,
++        page_tree_maximum_entries=1000,
++        page_tree_maximum_page_entries=20000,
++        page_tree_maximum_depth=30,
++        xform_maximum_invocations_per_extraction=100,
++        jbig2dec_binary=None,
++    )
++
++    data = sys.stdin.buffer.read(MAX_INPUT + 1)
++    if len(data) > MAX_INPUT:
++        return {"error": "PDF 超过 8 MiB 限制；文件已保存。"}
++    reader = PdfReader(
++        io.BytesIO(data),
++        strict=False,
++        root_object_recovery_limit=1000,
++        xref_stream_maximum_entries=50000,
++    )
++    if reader.is_encrypted:
++        return {"error": "PDF 已加密，需要密码才能读取正文；文件已保存。"}
++    out = Preview()
++    for index, page in enumerate(reader.pages):
++        if index >= 20 or out.full:
++            out.truncated = True
++            break
++        # Decompression itself is also confined by the child memory/time budget.
++        contents = page.get_contents()
++        if contents is not None and len(contents.get_data()) > 4 * 1024 * 1024:
++            return {"error": "PDF 单页解压内容超过 4 MiB 预览限制；文件已保存。"}
++        out.add(page.extract_text() or "")
++    return {"text": "\n".join(out.parts)[:MAX_TEXT], "truncated": out.truncated}
++
++
++def extract_document_text(data: bytes, filename: str) -> dict:
++    kind = Path(filename).suffix.lower()
++    result = {
++        "text_preview": "",
++        "preview_truncated": False,
++        "parser_available": False,
++        "preview_format": kind.lstrip("."),
++        "preview_error": None,
++    }
++    if kind not in FORMATS:
++        return result
++    if len(data) > MAX_INPUT:
++        return {**result, "preview_error": "文档超过 8 MiB 正文预览限制"}
++    pdf_library = kind == ".pdf" and importlib.util.find_spec("pypdf") is not None
++    executable = shutil.which("pdftotext") if kind == ".pdf" else None
++    if kind == ".pdf" and not (pdf_library or executable):
++        return {
++            **result,
++            "preview_error": "电脑缺少 pypdf 或 pdftotext，PDF 已保存，但无法提取正文。",
++        }
++    out = Preview()
++    try:
++        if kind != ".pdf":
++            _validate_zip(data)
++        result["parser_available"] = True
++        if kind == ".docx":
++            _docx(data, out)
++        elif kind == ".xlsx":
++            _xlsx(data, out)
++        elif kind == ".pptx":
++            _pptx(data, out)
++        elif pdf_library:
++            _pdf_library(data, out)
++        else:
++            _pdf(data, out, executable)
++        result.update(text_preview="\n".join(out.parts)[:MAX_TEXT], preview_truncated=out.truncated)
++        if not out.parts:
++            result["preview_error"] = "未提取到正文；扫描件需要 OCR，嵌入内容可能不支持。"
++    except PdfPreviewError as exc:
++        result["preview_error"] = str(exc)
++    except ImportError:
++        result.update(
++            parser_available=False, preview_error="电脑缺少对应 Office 解析库，文件已保存。"
++        )
++    except Exception as exc:
++        # Do not echo internal parser tracebacks or document bytes to the client.
++        result["preview_error"] = f"无法生成文档正文预览（{type(exc).__name__}）；文件已保存。"
++    return result
++
++
++if __name__ == "__main__" and sys.argv[1:] == ["--pdf-worker"]:
++    try:
++        output = _pdf_worker()
++    except MemoryError:
++        output = {"error": "PDF 解析超出内存限制；文件已保存。"}
++    except Exception as exc:
++        output = {
++            "error": "PDF 超出单流 4 MiB 或结构解析限制；文件已保存。"
++            if type(exc).__name__ == "LimitReachedError"
++            else "PDF 损坏或无法解析；文件已保存。"
++        }
++    print(json.dumps(output, ensure_ascii=True))
+diff --git a/src/deepseek_tui/mobile/files.py b/src/deepseek_tui/mobile/files.py
+new file mode 100644
+index 00000000..e2259599
+--- /dev/null
++++ b/src/deepseek_tui/mobile/files.py
+@@ -0,0 +1,233 @@
++"""Bounded mobile transfers scoped to a thread's execution workspace.
++
++Mounted under the app's existing bearer authentication. Never accepts an absolute
++path or follows a symlink, including during the actual file open (dir_fd).
++"""
++
++from __future__ import annotations
++
++import asyncio
++import base64
++import binascii
++import hashlib
++import json
++import os
++import re
++import stat
++import uuid
++from contextlib import contextmanager
++from pathlib import Path
++
++from fastapi import APIRouter, HTTPException, Request
++
++from deepseek_tui.media import IMAGE_EXTENSIONS, import_image
++from deepseek_tui.mobile.document_text import extract_document_text
++from deepseek_tui.tools.path_access import is_sensitive
++from deepseek_tui.workspace.execution import execution_root
++
++router = APIRouter(prefix="/v1/threads/{thread_id}", tags=["mobile-files"])
++MAX_BYTES = 8 * 1024 * 1024
++MAX_BODY = ((MAX_BYTES + 2) // 3) * 4 + 4096
++UPLOADS = "mobile-attachments"
++_PRIVATE_DIRS = {".git", ".ssh", ".aws", ".deepseek", ".gnupg", ".azure"}
++
++
++def _owner(thread_id: str) -> str:
++    return hashlib.sha256(thread_id.encode()).hexdigest()[:24]
++
++
++def _root(request: Request, thread_id: str) -> Path:
++    manager = getattr(request.app.state, "thread_manager", None)
++    if manager is None:
++        raise HTTPException(503, "Runtime thread manager is unavailable")
++    try:
++        thread = manager.store.load_thread(thread_id)
++        return execution_root(thread).resolve(strict=True)
++    except FileNotFoundError as exc:
++        raise HTTPException(404, "Conversation or workspace not found") from exc
++    except ValueError as exc:
++        raise HTTPException(409, str(exc)) from exc
++
++
++def _parts(raw: str, thread_id: str) -> list[str]:
++    if len(raw) > 2048 or raw.startswith("/") or "\\" in raw or "\x00" in raw:
++        raise HTTPException(400, "Use a workspace-relative path")
++    parts = raw.split("/") if raw else []
++    if any(part in {"", ".", ".."} for part in parts):
++        raise HTTPException(400, "Invalid workspace path")
++    if any(part in _PRIVATE_DIRS or is_sensitive(Path(part), write=False) for part in parts):
++        raise HTTPException(403, "Sensitive files are not available through mobile file browsing")
++    if len(parts) > 1 and parts[0] == UPLOADS and parts[1] != _owner(thread_id):
++        raise HTTPException(403, "Attachment belongs to another conversation")
++    return parts
++
++
++@contextmanager
++def _directory(root: Path, parts: list[str], *, create: bool = False):
++    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    try:
++        for part in parts:
++            if create:
++                try:
++                    os.mkdir(part, 0o700, dir_fd=fd)
++                except FileExistsError:
++                    pass
++            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
++            os.close(fd)
++            fd = child
++        yield fd
++    finally:
++        os.close(fd)
++
++
++def _translate(exc: OSError) -> HTTPException:
++    if isinstance(exc, FileNotFoundError):
++        return HTTPException(404, "File or directory no longer exists")
++    return HTTPException(
++        403, "File access denied; symbolic links and special files are unavailable"
++    )
++
++
++def _list(root: Path, parts: list[str], thread_id: str) -> dict:
++    entries = []
++    truncated = False
++    try:
++        with _directory(root, parts) as fd:
++            # scandir stops after the response limit; no unbounded directory materialization.
++            with os.scandir(fd) as iterator:
++                for entry in iterator:
++                    relative = "/".join([*parts, entry.name])
++                    try:
++                        _parts(relative, thread_id)
++                        info = entry.stat(follow_symlinks=False)
++                        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
++                            continue
++                    except (HTTPException, OSError):
++                        continue
++                    if len(entries) == 300:
++                        truncated = True
++                        break
++                    entries.append(
++                        {
++                            "name": entry.name,
++                            "path": relative,
++                            "directory": stat.S_ISDIR(info.st_mode),
++                            "size": info.st_size,
++                        }
++                    )
++    except OSError as exc:
++        raise _translate(exc) from exc
++    entries.sort(key=lambda item: (not item["directory"], item["name"].casefold()))
++    return {"path": "/".join(parts), "entries": entries, "truncated": truncated}
++
++
++def _content(root: Path, parts: list[str]) -> dict:
++    if not parts:
++        raise HTTPException(400, "Choose a file")
++    try:
++        with _directory(root, parts[:-1]) as parent:
++            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
++            with os.fdopen(fd, "rb") as stream:
++                info = os.fstat(stream.fileno())
++                if not stat.S_ISREG(info.st_mode):
++                    raise HTTPException(403, "Only regular files can be downloaded")
++                if info.st_size > MAX_BYTES:
++                    raise HTTPException(413, "File exceeds the 8 MiB mobile transfer limit")
++                data = stream.read(MAX_BYTES + 1)
++    except OSError as exc:
++        raise _translate(exc) from exc
++    if len(data) > MAX_BYTES:
++        raise HTTPException(413, "File exceeds the 8 MiB mobile transfer limit")
++    return {
++        "name": parts[-1],
++        "size": len(data),
++        "data_base64": base64.b64encode(data).decode(),
++        "path": "/".join(parts),
++    }
++
++
++def _upload(root: Path, thread_id: str, payload: dict) -> dict:
++    name, encoded = payload.get("name"), payload.get("data_base64")
++    if not isinstance(name, str) or not isinstance(encoded, str) or len(name) > 255:
++        raise HTTPException(400, "Provide a filename and base64 file content")
++    if not name or "/" in name or "\\" in name or any(ord(c) < 32 for c in name):
++        raise HTTPException(400, "Invalid attachment filename")
++    _parts(name, thread_id)
++    try:
++        data = base64.b64decode(encoded, validate=True)
++    except (binascii.Error, ValueError) as exc:
++        raise HTTPException(400, "Invalid base64 content") from exc
++    if len(data) > MAX_BYTES:
++        raise HTTPException(413, "Attachment exceeds 8 MiB")
++    # Use the original media validator. The original @ mention expansion creates
++    # ImageBlocks at send time; this endpoint does not invent a second image protocol.
++    image = None
++    if Path(name).suffix.lower() in IMAGE_EXTENSIONS:
++        try:
++            image = import_image(data)
++        except ValueError as exc:
++            raise HTTPException(400, str(exc)) from exc
++    safe = re.sub(r"[^\w. -]", "_", name).strip(" .") or "attachment"
++    suffix = Path(safe).suffix[:16]
++    safe = Path(safe).stem[:100] + suffix
++    stored_name = f"{uuid.uuid4().hex}-{safe}"
++    parts = [UPLOADS, _owner(thread_id), stored_name]
++    try:
++        with _directory(root, parts[:-1], create=True) as parent:
++            fd = os.open(
++                stored_name,
++                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
++                0o600,
++                dir_fd=parent,
++            )
++            try:
++                with os.fdopen(fd, "wb") as stream:
++                    stream.write(data)
++            except BaseException:
++                os.unlink(stored_name, dir_fd=parent)
++                raise
++    except OSError as exc:
++        raise _translate(exc) from exc
++    relative = "/".join(parts)
++    return {
++        "name": name,
++        "path": relative,
++        "size": len(data),
++        "mention": f'@"{relative}"',
++        "kind": "image" if image else "file",
++        "image": image.model_dump() if image else None,
++        **(
++            extract_document_text(data, name)
++            if not image and payload.get("extract_text", True) is not False
++            else {}
++        ),
++    }
++
++
++@router.get("/files")
++async def list_files(request: Request, thread_id: str, path: str = "") -> dict:
++    return await asyncio.to_thread(
++        _list, _root(request, thread_id), _parts(path, thread_id), thread_id
++    )
++
++
++@router.get("/files/content")
++async def file_content(request: Request, thread_id: str, path: str) -> dict:
++    return await asyncio.to_thread(_content, _root(request, thread_id), _parts(path, thread_id))
++
++
++@router.post("/attachments")
++async def upload_attachment(request: Request, thread_id: str) -> dict:
++    root = _root(request, thread_id)
++    body = bytearray()
++    async for chunk in request.stream():
++        if len(body) + len(chunk) > MAX_BODY:
++            raise HTTPException(413, "Attachment request exceeds the mobile transfer limit")
++        body.extend(chunk)
++    try:
++        payload = json.loads(body)
++    except (ValueError, UnicodeError) as exc:
++        raise HTTPException(400, "Invalid JSON attachment") from exc
++    if not isinstance(payload, dict):
++        raise HTTPException(400, "Invalid attachment")
++    return await asyncio.to_thread(_upload, root, thread_id, payload)
+diff --git a/src/deepseek_tui/mobile/git.py b/src/deepseek_tui/mobile/git.py
+new file mode 100644
+index 00000000..0715ebb9
+--- /dev/null
++++ b/src/deepseek_tui/mobile/git.py
+@@ -0,0 +1,188 @@
++"""Thread-scoped bridge to the existing desktop Git service bundle."""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import os
++from pathlib import Path
++
++from fastapi import APIRouter, HTTPException, Request
++
++from deepseek_tui.mobile.files import _parts, _root
++from deepseek_tui.workspace.project_lease import ProjectLease, ThreadLease
++
++router = APIRouter(prefix="/v1/threads/{thread_id}/git", tags=["mobile-git"])
++_WRITES = {"stage", "unstage", "commit", "switch", "createBranch", "pull", "push"}
++_SCOPES = {"working-tree", "staged", "unstaged"}
++_locks: dict[str, asyncio.Lock] = {}
++_RUNTIME_ROOT = str(Path(__file__).resolve().parents[3])
++
++
++def _safe(root: Path, raw: str, thread_id: str) -> None:
++    parts = _parts(raw, thread_id)
++    if not parts:
++        raise HTTPException(400, "Select individual files")
++    path = root
++    for part in parts:
++        path = path / part
++        if path.is_symlink():
++            raise HTTPException(403, "Symbolic links are unavailable through mobile Git")
++    if not path.resolve().is_relative_to(root):
++        raise HTTPException(403, "File is outside the conversation workspace")
++    if path.is_dir():
++        raise HTTPException(400, "Select individual files, not directories")
++
++
++async def _invoke(root: Path, action: str, **args) -> dict:
++    helper = os.environ.get("DEEPSEEK_MOBILE_GIT_HELPER", "").strip()
++    if not helper or not await asyncio.to_thread(Path(helper).is_file):
++        raise HTTPException(
++            503, "Build and configure the desktop Git helper on this computer first"
++        )
++    proc = await asyncio.create_subprocess_exec(
++        os.environ.get("DEEPSEEK_NODE", "node"),
++        helper,
++        stdin=asyncio.subprocess.PIPE,
++        stdout=asyncio.subprocess.PIPE,
++        stderr=asyncio.subprocess.DEVNULL,
++        # Retain the desktop development-checkout branch-switch protection.
++        env={
++            **os.environ,
++            "GIT_TERMINAL_PROMPT": "0",
++            "ELECTRON_RENDERER_URL": "mobile-runtime",
++            "DEEPSEEK_REPO_ROOT": _RUNTIME_ROOT,
++        },
++    )
++    try:
++        stdout, _ = await asyncio.wait_for(
++            proc.communicate(
++                json.dumps({"workspace": str(root), "action": action, **args}).encode()
++            ),
++            timeout=100,
++        )
++    except (asyncio.TimeoutError, asyncio.CancelledError):
++        proc.kill()
++        await proc.wait()
++        raise
++    if len(stdout) > 4 * 1024 * 1024:
++        raise HTTPException(413, "Git result is too large for mobile preview")
++    try:
++        result = json.loads(stdout)
++    except ValueError as exc:
++        raise HTTPException(502, "Git helper returned an invalid response") from exc
++    if not isinstance(result, dict) or not result.get("ok"):
++        raise HTTPException(
++            409,
++            result.get("message", "Git operation failed")
++            if isinstance(result, dict)
++            else "Git operation failed",
++        )
++    return result
++
++
++def _filter(result: dict, root: Path, thread_id: str) -> dict:
++    hidden = 0
++    for key in ("files", "stagedFiles", "unstagedFiles"):
++        if key not in result:
++            continue
++        visible = []
++        for file in result[key]:
++            try:
++                _safe(root, file["path"], thread_id)
++            except HTTPException:
++                hidden += 1
++                continue
++            # The existing service already provides a separate selected-file diff.
++            visible.append({**file, "patch": ""})
++        result[key] = visible
++    result["has_hidden_files"] = hidden > 0
++    return result
++
++
++@router.get("/{action}")
++async def read_git(
++    request: Request,
++    thread_id: str,
++    action: str,
++    path: str = "",
++    scope: str = "working-tree",
++    untracked: bool = False,
++) -> dict:
++    if action not in {"branches", "changes", "diff"} or scope not in _SCOPES:
++        raise HTTPException(400, "Unsupported Git query")
++    root = _root(request, thread_id)
++    if action == "diff":
++        _safe(root, path, thread_id)
++    try:
++        result = await _invoke(root, action, path=path, scope=scope, untracked=untracked)
++    except asyncio.TimeoutError as exc:
++        raise HTTPException(504, "Git query timed out") from exc
++    return _filter(result, root, thread_id) if action == "changes" else result
++
++
++@router.post("/{action}")
++async def write_git(request: Request, thread_id: str, action: str) -> dict:
++    if action not in _WRITES:
++        raise HTTPException(400, "Unsupported Git action")
++    raw = bytearray()
++    async for chunk in request.stream():
++        raw.extend(chunk)
++        if len(raw) > 24000:
++            raise HTTPException(413, "Git action request is too large")
++    try:
++        body = json.loads(raw)
++    except ValueError as exc:
++        raise HTTPException(400, "Invalid Git request") from exc
++    if not isinstance(body, dict) or body.get("confirm") is not True:
++        raise HTTPException(409, "Review and explicitly confirm the Git operation")
++    root = _root(request, thread_id)
++    args = {}
++    if action in {"stage", "unstage"}:
++        paths = body.get("paths")
++        if not isinstance(paths, list) or not paths or len(paths) > 100:
++            raise HTTPException(400, "Select between 1 and 100 files")
++        for path in paths:
++            if not isinstance(path, str):
++                raise HTTPException(400, "Invalid file path")
++            _safe(root, path, thread_id)
++        args["paths"] = paths
++    if action == "commit":
++        message = body.get("message")
++        if not isinstance(message, str) or not message.strip() or len(message) > 4000:
++            raise HTTPException(400, "Enter a commit message (maximum 4000 characters)")
++        args["message"] = message
++    if action in {"switch", "createBranch"}:
++        branch = body.get("branch")
++        if (
++            not isinstance(branch, str)
++            or not branch.strip()
++            or branch.startswith("-")
++            or len(branch) > 200
++        ):
++            raise HTTPException(400, "Enter a valid branch name")
++        args["branch"] = branch
++    async with _locks.setdefault(str(root), asyncio.Lock()):
++        manager = request.app.state.thread_manager
++        if await manager.is_thread_turn_active(thread_id):
++            raise HTTPException(409, "Stop the active conversation turn before changing Git state")
++        thread_lease, project_lease = ThreadLease(thread_id), ProjectLease(root)
++        if not await thread_lease.acquire(nonblocking=True):
++            raise HTTPException(409, "Conversation has an active operation")
++        try:
++            if not await project_lease.acquire(nonblocking=True):
++                raise HTTPException(409, "Project is being updated; retry after it finishes")
++            try:
++                if action == "commit":
++                    staged = await _invoke(root, "changes", scope="staged")
++                    for file in staged.get("files", []):
++                        _safe(root, file["path"], thread_id)
++                return await _invoke(root, action, **args)
++            finally:
++                project_lease.release()
++        except asyncio.TimeoutError as exc:
++            raise HTTPException(
++                504, "Git action timed out; refresh state before deciding what to do"
++            ) from exc
++        finally:
++            thread_lease.release()
+diff --git a/src/deepseek_tui/mobile/models.py b/src/deepseek_tui/mobile/models.py
+new file mode 100644
+index 00000000..7f8173e1
+--- /dev/null
++++ b/src/deepseek_tui/mobile/models.py
+@@ -0,0 +1,72 @@
++"""Safe model metadata and explicit discovery via the existing Workbench client."""
++from __future__ import annotations
++import asyncio
++import json
++import os
++from pathlib import Path
++
++from fastapi import APIRouter, HTTPException, Request
++
++router = APIRouter(prefix="/v1/model-catalog", tags=["models"])
++
++
++def _provider(request: Request, provider: str):
++    config = request.app.state.thread_manager.config
++    if provider not in {config.provider, *config.providers}:
++        raise HTTPException(404, "电脑没有配置此提供商")
++    selected = config if provider == config.provider else config.model_copy(update={
++        "provider": provider, "api_key": None, "base_url": None, "model": None,
++    })
++    try:
++        return selected.effective_provider_config()
++    except ValueError as exc:
++        raise HTTPException(409, "提供商配置不完整，请在电脑上完成设置") from exc
++
++
++@router.get("")
++async def model_catalog(request: Request):
++    config = request.app.state.thread_manager.config
++    providers = []
++    for name in sorted({config.provider, *config.providers}):
++        try:
++            settings = _provider(request, name)
++        except HTTPException:
++            providers.append({"id": name, "configured": False, "models": [], "discoverable": False})
++            continue
++        models = sorted({settings.model, *settings.context_windows, *settings.image_models} - {None, ""})
++        providers.append({"id": name, "configured": bool(settings.api_key), "models": models,
++                          "discoverable": settings.protocol == "openai" and bool(settings.base_url), "default_model": settings.model})
++    return {"providers": providers, "active_provider": config.provider}
++
++
++@router.post("/{provider}/refresh")
++async def refresh_models(request: Request, provider: str):
++    settings = _provider(request, provider)
++    if settings.protocol != "openai":
++        raise HTTPException(400, "此协议暂不提供模型发现，请使用电脑已配置模型或手动填写模型 ID")
++    if not settings.base_url:
++        raise HTTPException(409, "电脑尚未配置此提供商的 API 地址")
++    if not settings.api_key:
++        raise HTTPException(409, "电脑尚未配置此提供商的 API 密钥")
++    helper = Path(os.environ.get("DEEPSEEK_MOBILE_MODELS_HELPER", ""))
++    if not helper.is_file():
++        raise HTTPException(503, "电脑尚未安装模型目录适配服务")
++    process = await asyncio.create_subprocess_exec(
++        os.environ.get("MOBILE_NODE_BINARY", "node"), str(helper),
++        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
++        stderr=asyncio.subprocess.DEVNULL,
++    )
++    try:
++        output, _ = await asyncio.wait_for(process.communicate(json.dumps({
++            "baseUrl": settings.base_url, "apiKey": settings.api_key,
++        }).encode()), 12)
++        result = json.loads(output)
++        if process.returncode or not result.get("ok"):
++            raise HTTPException(502, "模型列表获取失败，请检查电脑配置或手动填写模型 ID")
++        return {"provider": provider, "models": result["modelIds"], "source": "upstream"}
++    except (TimeoutError, ValueError, KeyError) as exc:
++        raise HTTPException(502, "模型目录服务超时或响应无效") from exc
++    finally:
++        if process.returncode is None:
++            process.kill()
++            await process.wait()
+diff --git a/src/deepseek_tui/mobile/settings.py b/src/deepseek_tui/mobile/settings.py
+new file mode 100644
+index 00000000..241a3a74
+--- /dev/null
++++ b/src/deepseek_tui/mobile/settings.py
+@@ -0,0 +1,432 @@
++"""Authenticated, bounded adapters to existing skills, project memory and MCP stores.
++
++Mount on the Runtime app (RuntimeAuthMiddleware applies). Saving MCP does not
++reload connectors or execute commands; a Runtime restart is explicitly required.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import hashlib
++import json
++import os
++import re
++import stat
++from itertools import islice
++from pathlib import Path
++from urllib.parse import urlsplit
++
++from fastapi import APIRouter, HTTPException, Request
++
++from deepseek_tui.integrations import skills
++from deepseek_tui.state.memory import MemoryStore
++from deepseek_tui.utils import write_json_atomic
++from deepseek_tui.workspace.execution import project_root
++from deepseek_tui.workspace.project_lease import FileLease
++
++router = APIRouter(prefix="/v1/mobile-settings", tags=["mobile-settings"])
++MAX_BODY = 64 * 1024
++MAX_DOC = 256 * 1024
++
++
++async def body(request: Request) -> dict:
++    chunks = bytearray()
++    async for chunk in request.stream():
++        chunks.extend(chunk)
++        if len(chunks) > MAX_BODY:
++            raise HTTPException(413, "Settings request exceeds 64 KiB")
++    try:
++        value = json.loads(chunks)
++    except (ValueError, UnicodeDecodeError) as exc:
++        raise HTTPException(400, "Invalid JSON") from exc
++    if not isinstance(value, dict):
++        raise HTTPException(400, "JSON object required")
++    return value
++
++
++def name(value: str) -> str:
++    if not re.fullmatch(r"[\w.-]{1,120}", value) or value in {".", ".."}:
++        raise HTTPException(400, "Invalid item name")
++    return value
++
++
++def read_small(path: Path, cap: int) -> bytes:
++    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
++    with os.fdopen(fd, "rb") as stream:
++        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
++            raise ValueError("Only regular files are supported")
++        value = stream.read(cap + 1)
++    if len(value) > cap:
++        raise ValueError("File exceeds supported size")
++    return value
++
++
++def skill_root() -> Path:
++    root = skills.default_skills_dir()
++    if root.is_symlink():
++        raise HTTPException(403, "Skills directory cannot be a symbolic link")
++    return root
++
++
++def skill_path(identifier: str) -> Path:
++    root = skill_root()
++    path = root / name(identifier)
++    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
++        raise HTTPException(403, "Skill path is outside the user skills directory")
++    return path
++
++
++def skill_record(identifier: str, *, content: bool = False) -> dict:
++    directory = skill_path(identifier)
++    try:
++        doc = read_small(directory / "SKILL.md", MAX_DOC).decode("utf-8")
++        parsed = skills._parse_skill_file(directory / "SKILL.md", content=doc)
++    except FileNotFoundError as exc:
++        raise HTTPException(404, "User skill not found") from exc
++    except (OSError, ValueError) as exc:
++        raise HTTPException(400, "Cannot read this skill document") from exc
++    builtin = (directory / skills.SYSTEM_VERSION_MARKER).exists()
++    out = {
++        "id": identifier,
++        "name": parsed.name,
++        "description": parsed.description,
++        "builtin": builtin,
++        "can_delete": not builtin and (directory / skills.INSTALLED_FROM_MARKER).is_file(),
++    }
++    if content:
++        out["content"] = doc
++    return out
++
++
++@router.get("/skills")
++async def list_user_skills():
++    root = skill_root()
++
++    def inspect():
++        records = []
++        if root.exists():
++            for entry in sorted(islice(root.iterdir(), 500)):
++                if entry.is_dir() and not entry.is_symlink() and (entry / "SKILL.md").exists():
++                    try:
++                        records.append(skill_record(entry.name))
++                    except HTTPException:
++                        continue
++        return {"skills": records}
++
++    return await asyncio.to_thread(inspect)
++
++
++@router.get("/skills/{identifier}")
++async def get_skill(identifier: str):
++    return await asyncio.to_thread(skill_record, identifier, content=True)
++
++
++@router.post("/skills/install", status_code=201)
++async def install_skill(request: Request):
++    value = await body(request)
++    if value.get("confirm") is not True:
++        raise HTTPException(400, "Confirm skill installation explicitly")
++    source = skills.InstallSource.parse(str(value.get("source", "")))
++    if source.kind not in {"local", "github"}:
++        raise HTTPException(400, "Use a local directory or github:owner/repo")
++    identifier = name(
++        str(
++            value.get("name")
++            or (Path(source.local_path).name if source.kind == "local" else source.repo)
++        )
++    )
++
++    def install():
++        root = skill_root()
++        if source.kind == "local":
++            total = count = 0
++            local = Path(source.local_path)
++            if local.is_symlink():
++                raise HTTPException(400, "Local skill source cannot be a symbolic link")
++            for entry in local.rglob("*"):
++                if entry.is_symlink():
++                    raise HTTPException(400, "Local skill cannot include symbolic links")
++                if entry.is_file():
++                    count += 1
++                    total += entry.stat().st_size
++                    if count > 1000 or total > skills.DEFAULT_MAX_SIZE_BYTES:
++                        raise HTTPException(413, "Local skill exceeds installation limit")
++        # Reuse the original lock to cover marker removal as part of installation.
++        with skills._SKILL_MUTATION_LOCK:
++            outcome, message = skills.install(source, root, identifier)
++            if outcome == skills.InstallOutcome.FAILED:
++                raise HTTPException(400, message)
++            if outcome == skills.InstallOutcome.INSTALLED:
++                (skill_path(identifier) / skills.TRUSTED_MARKER).unlink(missing_ok=True)
++            return {"outcome": outcome.value, "message": message}
++
++    return await asyncio.to_thread(install)
++
++
++@router.delete("/skills/{identifier}")
++async def delete_skill(identifier: str, request: Request):
++    if (await body(request)).get("confirm") is not True:
++        raise HTTPException(400, "Confirm skill deletion explicitly")
++
++    def remove():
++        with skills._SKILL_MUTATION_LOCK:
++            if not skill_record(identifier)["can_delete"]:
++                raise HTTPException(403, "Built-in or manually installed skills cannot be deleted")
++            message = skills.uninstall(identifier, skill_root())
++            if not message.startswith("Uninstalled "):
++                raise HTTPException(400, message)
++            return {"message": message}
++
++    return await asyncio.to_thread(remove)
++
++
++def memory_store(request: Request, thread_id: str) -> MemoryStore:
++    try:
++        thread = request.app.state.thread_manager.store.load_thread(thread_id)
++    except FileNotFoundError as exc:
++        raise HTTPException(404, "Conversation not found") from exc
++    return MemoryStore(project_root(thread))
++
++
++@router.get("/threads/{thread_id}/memories")
++async def list_memories(request: Request, thread_id: str, query: str = "", offset: int = 0):
++    if len(query) > 2000 or not 0 <= offset <= 100000:
++        raise HTTPException(400, "Invalid memory query")
++
++    def read():
++        store = memory_store(request, thread_id)
++        entries = store.read(query=query, status="all", offset=offset, limit=20)
++        return {
++            "entries": [
++                {**entry.model_dump(mode="json"), "stale_reason": store.stale_reason(entry)}
++                for entry in entries
++            ],
++            "offset": offset,
++        }
++
++    return await asyncio.to_thread(read)
++
++
++@router.post("/threads/{thread_id}/memories")
++@router.patch("/threads/{thread_id}/memories/{entry_id}")
++@router.delete("/threads/{thread_id}/memories/{entry_id}")
++async def write_memory(request: Request, thread_id: str, entry_id: str = ""):
++    value = await body(request)
++    action = "forget" if request.method == "DELETE" else "update" if entry_id else "remember"
++    if entry_id and type(value.get("revision")) is not int:
++        raise HTTPException(400, "Current memory revision is required")
++    if action == "forget" and value.get("confirm") is not True:
++        raise HTTPException(400, "Confirm memory deletion explicitly")
++
++    def write():
++        store = memory_store(request, thread_id)
++        fields = {}
++        if action == "update":
++            existing = store.read(entry_id=entry_id, status="all")
++            if not existing:
++                raise HTTPException(404, "Memory not found")
++            old = existing[0]
++            fields = {
++                "content": old.content,
++                "kind": old.kind,
++                "applicability": old.applicability,
++                "topic": old.topic,
++                "branch": old.branch,
++                "expires_at": old.expires_at,
++            }
++        for key, limit in (("content", 2000), ("kind", 30), ("applicability", 500), ("topic", 100)):
++            if key in value:
++                if not isinstance(value[key], str) or len(value[key]) > limit:
++                    raise HTTPException(400, f"Invalid memory {key}")
++                fields[key] = value[key]
++        try:
++            entry = store.write(
++                action=action,
++                entry_id=entry_id,
++                revision=value.get("revision"),
++                source={"type": "user", "thread_id": thread_id, "client": "mobile"},
++                **fields,
++            )
++        except ValueError as exc:
++            raise HTTPException(409 if "revision" in str(exc) else 400, str(exc)) from exc
++        return entry.model_dump(mode="json")
++
++    return await asyncio.to_thread(write)
++
++
++def mcp_path(request: Request) -> Path:
++    from deepseek_tui.config.paths import user_mcp_config_path
++
++    path = user_mcp_config_path()
++    configured = Path(request.app.state.runtime.config.mcp_config_path)
++    if configured.resolve() != path.resolve():
++        raise HTTPException(409, "Custom MCP config must be managed on the computer")
++    if path.is_symlink() or path.parent.is_symlink():
++        raise HTTPException(403, "MCP settings cannot be a symbolic link")
++    return path
++
++
++def mcp_read(path: Path) -> tuple[dict, str]:
++    try:
++        raw = read_small(path, 1024 * 1024)
++    except FileNotFoundError:
++        raw = b"{}"
++    document = json.loads(raw)
++    if not isinstance(document, dict):
++        raise HTTPException(400, "MCP config must be an object")
++    return document, hashlib.sha256(raw).hexdigest()
++
++
++def public_mcp(document: dict, revision: str) -> dict:
++    from deepseek_tui.mcp.config import servers_from_document
++
++    servers = servers_from_document(document)
++    return {
++        "revision": revision,
++        "servers": [
++            {
++                "name": s.name,
++                "enabled": s.enabled,
++                "transport": s.transport or ("stdio" if s.command else "streamablehttp"),
++                "url_origin": f"{urlsplit(s.url).scheme}://{urlsplit(s.url).hostname}"
++                if s.url
++                else None,
++                "has_command": bool(s.command),
++                "args_count": len(s.args),
++                "has_env": bool(s.env),
++                "has_headers": bool(s.headers),
++                "load_policy": s.load_policy,
++            }
++            for s in servers
++        ],
++    }
++
++
++@router.get("/mcp")
++async def get_mcp(request: Request):
++    def get():
++        try:
++            document, revision = mcp_read(mcp_path(request))
++            return public_mcp(document, revision)
++        except (ValueError, OSError) as exc:
++            raise HTTPException(400, "Cannot read MCP configuration") from exc
++
++    return await asyncio.to_thread(get)
++
++
++@router.patch("/mcp/{identifier}")
++async def save_mcp(identifier: str, request: Request):
++    name(identifier)
++    value = await body(request)
++    if value.get("confirm") is not True:
++        raise HTTPException(400, "Confirm MCP configuration change explicitly")
++    allowed = {
++        "url",
++        "command",
++        "args",
++        "env",
++        "headers",
++        "enabled",
++        "load_policy",
++        "transport",
++        "revision",
++        "confirm",
++    }
++    if set(value) - allowed:
++        raise HTTPException(400, "Unsupported MCP setting")
++    updates = {key: val for key, val in value.items() if key not in {"revision", "confirm"}}
++    if "enabled" in updates and type(updates["enabled"]) is not bool:
++        raise HTTPException(400, "enabled must be a boolean")
++    if "transport" in updates and updates["transport"] not in {"stdio", "sse", "streamablehttp"}:
++        raise HTTPException(400, "Invalid transport")
++    if "load_policy" in updates and updates["load_policy"] not in {"progressive", "on_focus"}:
++        raise HTTPException(400, "Invalid load policy")
++    for key in ("url", "command"):
++        if key in updates and (
++            not isinstance(updates[key], str)
++            or len(updates[key]) > 4096
++            or not updates[key].strip()
++        ):
++            raise HTTPException(400, f"Invalid {key}")
++    if "url" in updates:
++        parsed = urlsplit(updates["url"])
++        if (
++            parsed.scheme not in {"http", "https"}
++            or not parsed.hostname
++            or parsed.username
++            or parsed.password
++        ):
++            raise HTTPException(400, "Use an HTTP(S) URL without embedded credentials")
++    if "args" in updates and (
++        not isinstance(updates["args"], list)
++        or len(updates["args"]) > 100
++        or any(not isinstance(arg, str) or len(arg) > 4096 for arg in updates["args"])
++    ):
++        raise HTTPException(400, "Invalid command arguments")
++    for key in ("env", "headers"):
++        if key in updates and (
++            not isinstance(updates[key], dict)
++            or len(updates[key]) > 30
++            or any(
++                not isinstance(k, str)
++                or not isinstance(v, str)
++                or len(k) > 200
++                or len(v) > 4096
++                or "\n" in k
++                or "\r" in k
++                or "\0" in k
++                or "\0" in v
++                or (key == "headers" and ("\r" in v or "\n" in v))
++                for k, v in updates[key].items()
++            )
++        ):
++            raise HTTPException(400, f"Invalid {key}")
++
++    def save():
++        from deepseek_tui.mcp.config import find_servers_table, servers_from_document
++
++        path = mcp_path(request)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        lock = path.with_name(path.name + ".mobile.lock")
++        if lock.is_symlink():
++            raise HTTPException(403, "MCP lock cannot be a symbolic link")
++        lease = FileLease(lock)
++        lease.acquire_blocking()
++        try:
++            document, revision = mcp_read(path)
++            if value.get("revision") != revision:
++                raise HTTPException(409, "MCP settings changed; reload before saving")
++            container, key, table = find_servers_table(document)
++            if table is None:
++                raise HTTPException(400, "Unsupported MCP document structure")
++            if not document:
++                document["mcpServers"] = {}
++                table = document["mcpServers"]
++            elif key is None and container is document:
++                table = document
++            record = dict(table.get(identifier, {}))
++            for key, val in updates.items():
++                if key in {"env", "headers"}:
++                    record[key] = {**record.get(key, {}), **val}
++                else:
++                    record[key] = val
++            if updates.get("transport") == "stdio":
++                record.pop("url", None)
++                record.pop("type", None)
++            elif updates.get("transport") in {"sse", "streamablehttp"}:
++                record.pop("command", None)
++                record.pop("type", None)
++            if not (record.get("command") or record.get("url")):
++                raise HTTPException(400, "A command or URL is required")
++            table[identifier] = record
++            servers_from_document(document)
++            write_json_atomic(path, document)
++            path.chmod(0o600)
++            _, revision = mcp_read(path)
++            return {**public_mcp(document, revision), "restart_required": True}
++        except (OSError, ValueError, TypeError) as exc:
++            raise HTTPException(400, "Cannot save MCP configuration") from exc
++        finally:
++            lease.release()
++
++    return await asyncio.to_thread(save)
+diff --git a/src/deepseek_tui/mobile/terminal.py b/src/deepseek_tui/mobile/terminal.py
+new file mode 100644
+index 00000000..93488ad2
+--- /dev/null
++++ b/src/deepseek_tui/mobile/terminal.py
+@@ -0,0 +1,128 @@
++"""Thread-owned remote PTYs backed by the shared Workbench terminal core."""
++from __future__ import annotations
++
++import asyncio
++import json
++import os
++from pathlib import Path
++
++from fastapi import APIRouter, HTTPException, Request
++from pydantic import BaseModel, Field
++
++from deepseek_tui.workspace.execution import execution_root
++
++router = APIRouter(prefix="/v1/threads/{thread_id}/terminal", tags=["terminal"])
++
++
++class CreateTerminal(BaseModel):
++    confirm: bool = False
++    cols: int = Field(default=80, ge=2, le=240)
++    rows: int = Field(default=24, ge=1, le=100)
++
++
++class TerminalInput(BaseModel):
++    data: str = Field(max_length=8192)
++
++
++class TerminalSize(BaseModel):
++    cols: int = Field(ge=2, le=240)
++    rows: int = Field(ge=1, le=100)
++
++
++class TerminalBridge:
++    def __init__(self):
++        self.process: asyncio.subprocess.Process | None = None
++        self.lock = asyncio.Lock()
++        self.sequence = 0
++
++    async def close(self):
++        process, self.process = self.process, None
++        if process and process.returncode is None:
++            process.terminate()
++            try:
++                await asyncio.wait_for(process.wait(), 3)
++            except TimeoutError:
++                process.kill()
++                await process.wait()
++
++    async def call(self, payload: dict) -> object:
++        async with self.lock:
++            if self.process is None or self.process.returncode is not None:
++                helper = Path(os.environ.get("DEEPSEEK_MOBILE_TERMINAL_HELPER", ""))
++                if not helper.is_file():
++                    raise HTTPException(503, "电脑尚未安装终端适配服务")
++                self.process = await asyncio.create_subprocess_exec(
++                    os.environ.get("MOBILE_NODE_BINARY", "node"), str(helper),
++                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
++                    stderr=asyncio.subprocess.DEVNULL, limit=1_000_000,
++                )
++            self.sequence += 1
++            assert self.process.stdin and self.process.stdout
++            try:
++                self.process.stdin.write((json.dumps({**payload, "id": self.sequence}) + "\n").encode())
++                await self.process.stdin.drain()
++                line = await asyncio.wait_for(self.process.stdout.readline(), 10)
++                result = json.loads(line)
++                if result.get("id") != self.sequence:
++                    raise ValueError("Terminal transport out of sync")
++            except (TimeoutError, ValueError, BrokenPipeError, ConnectionResetError) as exc:
++                await self.close()
++                raise HTTPException(503, "终端连接已中断，请重新打开终端") from exc
++            if not result.get("ok"):
++                raise HTTPException(409, result.get("message", "终端操作失败"))
++            return result.get("result")
++
++
++def _service(request: Request, thread_id: str) -> tuple[TerminalBridge, str]:
++    try:
++        thread = request.app.state.thread_manager.store.load_thread(thread_id)
++        root = execution_root(thread).resolve(strict=True)
++    except FileNotFoundError as exc:
++        raise HTTPException(404, "会话或工作区不存在") from exc
++    if not hasattr(request.app.state, "mobile_terminal"):
++        request.app.state.mobile_terminal = TerminalBridge()
++    return request.app.state.mobile_terminal, str(root)
++
++
++async def close_mobile_terminals(app):
++    service = getattr(app.state, "mobile_terminal", None)
++    if service:
++        await service.close()
++
++
++@router.get("")
++async def terminal_list(request: Request, thread_id: str):
++    service, _ = _service(request, thread_id)
++    return await service.call({"action": "list", "thread_id": thread_id})
++
++
++@router.post("")
++async def terminal_create(request: Request, thread_id: str, body: CreateTerminal):
++    if body.confirm is not True:
++        raise HTTPException(400, "请确认：终端直接以电脑用户权限执行 Shell 命令，不经过 Agent 工具审批")
++    service, root = _service(request, thread_id)
++    return await service.call({"action": "create", "thread_id": thread_id, "cwd": root, **body.model_dump()})
++
++
++@router.get("/{session_id}")
++async def terminal_read(request: Request, thread_id: str, session_id: str, offset: int = 0):
++    service, _ = _service(request, thread_id)
++    return await service.call({"action": "read", "thread_id": thread_id, "session_id": session_id, "offset": offset})
++
++
++@router.post("/{session_id}/input")
++async def terminal_write(request: Request, thread_id: str, session_id: str, body: TerminalInput):
++    service, _ = _service(request, thread_id)
++    return await service.call({"action": "write", "thread_id": thread_id, "session_id": session_id, "data": body.data})
++
++
++@router.post("/{session_id}/resize")
++async def terminal_resize(request: Request, thread_id: str, session_id: str, body: TerminalSize):
++    service, _ = _service(request, thread_id)
++    return await service.call({"action": "resize", "thread_id": thread_id, "session_id": session_id, **body.model_dump()})
++
++
++@router.delete("/{session_id}")
++async def terminal_close(request: Request, thread_id: str, session_id: str):
++    service, _ = _service(request, thread_id)
++    return await service.call({"action": "close", "thread_id": thread_id, "session_id": session_id})
+diff --git a/src/deepseek_tui/mobile/voice.py b/src/deepseek_tui/mobile/voice.py
+new file mode 100644
+index 00000000..8970844c
+--- /dev/null
++++ b/src/deepseek_tui/mobile/voice.py
+@@ -0,0 +1,97 @@
++"""Authenticated mobile audio transport to the existing Workbench ASR service.
++
++No provider credentials or provider implementation live in this router. Deployment
++sets DEEPSEEK_MOBILE_ASR_HELPER to the App's scripts/asr-bridge.mjs and RUNTIME_SOURCE.
++"""
++from __future__ import annotations
++
++import asyncio
++import base64
++import binascii
++import io
++import json
++import os
++from pathlib import Path
++import wave
++
++from fastapi import APIRouter, HTTPException, Request
++
++router = APIRouter(prefix="/v1/voice", tags=["voice"])
++_MAX_BYTES = 1_000_044
++_MAX_BODY = 1_400_000
++_gate = asyncio.Lock()
++
++
++def validate_recording(encoded: object) -> bytes:
++    if not isinstance(encoded, str) or len(encoded) > _MAX_BODY:
++        raise HTTPException(413, "录音超过大小限制")
++    try:
++        audio = base64.b64decode(encoded, validate=True)
++    except (ValueError, binascii.Error) as exc:
++        raise HTTPException(400, "录音编码无效") from exc
++    if not audio or len(audio) > _MAX_BYTES:
++        raise HTTPException(413, "录音为空或超过大小限制")
++    try:
++        with wave.open(io.BytesIO(audio), "rb") as wav:
++            # The shared recorder produces mono PCM16 at 16 kHz. Allow the
++            # 200 ms stop timer one second of scheduling tolerance at 30 s.
++            if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getcomptype()) != (1, 2, 16000, "NONE"):
++                raise ValueError("format")
++            frames = wav.getnframes()
++            if not 0 < frames <= 31 * 16000 or len(wav.readframes(frames)) != frames * 2:
++                raise ValueError("duration")
++    except (wave.Error, EOFError, ValueError) as exc:
++        raise HTTPException(400, "需要不超过 30 秒的单声道 PCM16/16kHz WAV 录音") from exc
++    return audio
++
++
++async def _bridge(payload: dict) -> dict:
++    helper = Path(os.environ.get("DEEPSEEK_MOBILE_ASR_HELPER", ""))
++    if not helper.is_file():
++        raise HTTPException(503, "电脑尚未安装语音适配服务")
++    process = await asyncio.create_subprocess_exec(
++        os.environ.get("MOBILE_NODE_BINARY", "node"), str(helper),
++        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
++        stderr=asyncio.subprocess.DEVNULL,
++    )
++    try:
++        stdout, _ = await asyncio.wait_for(process.communicate(json.dumps(payload).encode()), 60)
++        data = json.loads(stdout)
++        if process.returncode or not isinstance(data, dict):
++            raise HTTPException(503, "电脑语音服务暂不可用")
++        return data
++    except (TimeoutError, json.JSONDecodeError) as exc:
++        raise HTTPException(504, "语音服务超时或返回无效响应") from exc
++    finally:
++        if process.returncode is None:
++            process.kill()
++            await process.wait()
++
++
++@router.get("/status")
++async def voice_status() -> dict:
++    return await _bridge({"action": "status"})
++
++
++@router.post("/transcribe")
++async def transcribe(request: Request) -> dict:
++    # Bound before JSON parsing, including chunked requests without Content-Length.
++    body = bytearray()
++    async for chunk in request.stream():
++        body.extend(chunk)
++        if len(body) > _MAX_BODY:
++            raise HTTPException(413, "录音超过大小限制")
++    try:
++        payload = json.loads(body)
++        encoded = payload.get("audio") if isinstance(payload, dict) else None
++    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
++        raise HTTPException(400, "录音请求无效") from exc
++    validate_recording(encoded)
++    if _gate.locked():
++        raise HTTPException(409, "已有录音正在转写，请稍后重试")
++    async with _gate:
++        result = await _bridge({"action": "transcribe", "audio": encoded})
++    if not result.get("ok"):
++        raise HTTPException(503 if result.get("code") == "not_configured" else 502,
++                            result.get("message", "语音识别失败"))
++    return {"text": result.get("text", "")}
+diff --git a/tests/test_mobile_devices.py b/tests/test_mobile_devices.py
+new file mode 100644
+index 00000000..e5a583c0
+--- /dev/null
++++ b/tests/test_mobile_devices.py
+@@ -0,0 +1,155 @@
++from __future__ import annotations
++
++import asyncio
++import concurrent.futures
++import json
++import time
++
++import pytest
++from fastapi import FastAPI, HTTPException
++from fastapi.testclient import TestClient
++from starlette.responses import StreamingResponse
++
++from deepseek_tui.mobile import devices as devices
++from deepseek_tui.server.auth import RuntimeAuthMiddleware
++
++ADMIN = {"Authorization": "Bearer admin-test"}
++
++
++@pytest.fixture
++def client(tmp_path, monkeypatch):
++    monkeypatch.setenv("DEEPSEEK_HOME", str(tmp_path))
++    app = FastAPI()
++    app.state.runtime_auth_token = "admin-test"
++    app.include_router(devices.router)
++    app.add_middleware(RuntimeAuthMiddleware, auth_token="admin-test")
++
++    @app.get("/v1/test")
++    async def test():
++        return {"okay": True}
++
++    @app.get("/legacy/test")
++    async def legacy():
++        return {"okay": True}
++
++    @app.get("/v1/events/{device_id}")
++    async def events(device_id: str):
++        async def stream():
++            yield "data: first\n\n"
++            await asyncio.sleep(0.03)
++            await asyncio.to_thread(devices.revoke_device, device_id)
++            yield "data: should-not-arrive\n\n"
++
++        return StreamingResponse(stream(), media_type="text/event-stream")
++
++    @app.get("/v1/idle-events/{device_id}")
++    async def idle_events(device_id: str):
++        async def stream():
++            yield "data: connected\n\n"
++            await asyncio.sleep(0.03)
++            await asyncio.to_thread(devices.revoke_device, device_id)
++            await asyncio.sleep(30)
++            yield "data: should-not-arrive\n\n"
++
++        return StreamingResponse(stream(), media_type="text/event-stream")
++
++    with TestClient(app) as test_client:
++        yield test_client
++
++
++def pair(client):
++    code = client.post("/v1/mobile/devices/pair-codes", headers=ADMIN).json()["code"]
++    result = client.post(devices.PAIR_PATH, json={"code": code, "name": "Test phone"})
++    assert result.status_code == 200
++    return result.json(), code
++
++
++def test_admin_compatibility_pair_and_revoke(client):
++    assert client.get("/v1/test").status_code == 401
++    assert client.get("/legacy/test").status_code == 401
++    assert client.get("/v1/test", headers=ADMIN).status_code == 200
++    assert (
++        client.get("/legacy/test", headers={"x-deepseek-runtime-token": "admin-test"}).status_code
++        == 200
++    )
++    paired, code = pair(client)
++    token = {"Authorization": "Bearer " + paired["token"]}
++    assert client.get("/v1/test", headers=token).status_code == 200
++    assert client.get("/v1/mobile/devices/session", headers=token).json()["role"] == "device"
++    assert client.get("/v1/mobile/devices", headers=token).status_code == 403
++    assert client.post("/v1/mobile/devices/pair-codes", headers=token).status_code == 403
++    assert (
++        client.delete("/v1/mobile/devices/" + paired["device"]["id"], headers=token).status_code
++        == 403
++    )
++    listing = client.get("/v1/mobile/devices", headers=ADMIN)
++    assert "token" not in listing.text and "hash" not in listing.text
++    stored = devices._path().read_text()
++    assert (
++        paired["token"] not in stored
++        and code.replace("-", "") not in stored
++        and "admin-test" not in stored
++    )
++    assert devices._path().stat().st_mode & 0o777 == 0o600
++    assert client.post(devices.PAIR_PATH, json={"code": code, "name": "again"}).status_code == 400
++    assert (
++        client.delete("/v1/mobile/devices/" + paired["device"]["id"], headers=ADMIN).status_code
++        == 200
++    )
++    assert client.get("/v1/test", headers=token).status_code == 401
++    assert client.get("/v1/test", headers=ADMIN).status_code == 200
++
++
++def test_exact_pair_route_and_expiry_rate_limit(client, monkeypatch):
++    assert client.get(devices.PAIR_PATH).status_code == 401
++    assert client.post(devices.PAIR_PATH + "/anything").status_code == 401
++    code = devices.create_code()["code"]
++    data = json.loads(devices._path().read_text())
++    data["codes"][0]["expires_at"] = 0
++    devices._save(data)
++    assert client.post(devices.PAIR_PATH, json={"code": code, "name": "expired"}).status_code == 400
++    for _ in range(9):
++        assert (
++            client.post(devices.PAIR_PATH, json={"code": "wrong", "name": "phone"}).status_code
++            == 400
++        )
++    assert (
++        client.post(devices.PAIR_PATH, json={"code": "wrong", "name": "phone"}).status_code == 429
++    )
++
++
++def test_concurrent_code_consumption_has_exactly_one_winner(client):
++    code = devices.create_code()["code"]
++
++    def attempt(index):
++        try:
++            return devices.consume_code(code, f"phone{index}", f"address{index}")
++        except HTTPException as error:
++            return error.status_code
++
++    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
++        results = list(pool.map(attempt, range(8)))
++    assert sum(isinstance(item, dict) for item in results) == 1
++    assert sum(item == 400 for item in results if isinstance(item, int)) == 7
++
++
++def test_revoked_device_stream_stops(client):
++    paired, _ = pair(client)
++    response = client.get(
++        "/v1/events/" + paired["device"]["id"],
++        headers={"Authorization": "Bearer " + paired["token"]},
++    )
++    assert "first" in response.text
++    assert "should-not-arrive" not in response.text
++
++
++def test_revocation_disconnects_idle_sse_within_poll_interval(client):
++    paired, _ = pair(client)
++    started = time.monotonic()
++    response = client.get(
++        "/v1/idle-events/" + paired["device"]["id"],
++        headers={"Authorization": "Bearer " + paired["token"]},
++    )
++    assert "connected" in response.text
++    assert "should-not-arrive" not in response.text
++    assert time.monotonic() - started < 8
+diff --git a/tests/test_mobile_files.py b/tests/test_mobile_files.py
+new file mode 100644
+index 00000000..00d26b85
+--- /dev/null
++++ b/tests/test_mobile_files.py
+@@ -0,0 +1,129 @@
++from __future__ import annotations
++
++import base64
++import io
++from types import SimpleNamespace
++
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++from PIL import Image
++
++from deepseek_tui.mobile import files as files
++from deepseek_tui.state.context import UserTurnInput, process_turn_input
++
++
++@pytest.fixture
++def mobile(tmp_path, monkeypatch):
++    monkeypatch.setenv("DEEPSEEK_HOME", str(tmp_path / "home"))
++    root = tmp_path / "workspace"
++    root.mkdir()
++
++    def load(thread_id):
++        if thread_id not in {"a", "b", "isolated"}:
++            raise FileNotFoundError(thread_id)
++        return SimpleNamespace(
++            workspace=str(root),
++            env_mode="worktree" if thread_id == "isolated" else "local",
++            worktree_path=None,
++        )
++
++    app = FastAPI()
++    app.state.thread_manager = SimpleNamespace(store=SimpleNamespace(load_thread=load))
++    app.include_router(files.router)
++    with TestClient(app) as client:
++        yield client, root
++
++
++def upload(client, name, data, thread="a"):
++    return client.post(
++        f"/v1/threads/{thread}/attachments",
++        json={"name": name, "data_base64": base64.b64encode(data).decode()},
++    )
++
++
++def test_upload_roundtrip_and_thread_attachment_scope(mobile):
++    client, root = mobile
++    a = upload(client, "中文 notes.txt", b"hello").json()
++    b = upload(client, "中文 notes.txt", b"other").json()
++    assert a["path"] != b["path"]
++    assert (root / a["path"]).read_bytes() == b"hello"
++    r = client.get("/v1/threads/a/files/content", params={"path": a["path"]})
++    assert base64.b64decode(r.json()["data_base64"]) == b"hello"
++    assert client.get("/v1/threads/b/files/content", params={"path": a["path"]}).status_code == 403
++    assert client.get("/v1/threads/missing/files").status_code == 404
++    assert client.get("/v1/threads/isolated/files").status_code == 409
++
++
++@pytest.mark.parametrize(
++    "path",
++    [
++        "../outside",
++        "/etc/passwd",
++        "a/../../outside",
++        "a\\outside",
++        ".env",
++        ".aws/config",
++        ".git/config",
++        "dir/secrets.json",
++    ],
++)
++def test_rejects_paths(mobile, path):
++    client, _ = mobile
++    assert client.get("/v1/threads/a/files/content", params={"path": path}).status_code in {
++        400,
++        403,
++    }
++
++
++def test_symlinks_sensitive_files_and_fifo_hidden_and_unreadable(mobile, tmp_path):
++    import os
++
++    client, root = mobile
++    outside = tmp_path / "outside"
++    outside.mkdir()
++    (outside / "secret").write_text("secret")
++    (root / "link").symlink_to(outside, target_is_directory=True)
++    (root / "alias").symlink_to(outside / "secret")
++    (root / ".env").write_text("KEY=secret")
++    os.mkfifo(root / "pipe")
++    (root / "okay.txt").write_text("fine")
++    assert [e["name"] for e in client.get("/v1/threads/a/files").json()["entries"]] == ["okay.txt"]
++    for path in ("link/secret", "alias", "pipe"):
++        assert client.get("/v1/threads/a/files/content", params={"path": path}).status_code == 403
++    assert client.get("/v1/threads/a/files", params={"path": "link"}).status_code == 403
++    (root / files.UPLOADS).symlink_to(outside, target_is_directory=True)
++    assert upload(client, "file.txt", b"no").status_code == 403
++    assert list(outside.iterdir()) == [outside / "secret"]
++
++
++def test_upload_image_expands_via_original_runtime(mobile):
++    client, root = mobile
++    buffer = io.BytesIO()
++    Image.new("RGB", (4, 3), "blue").save(buffer, format="PNG")
++    result = upload(client, "photo.png", buffer.getvalue())
++    assert result.status_code == 200
++    body = result.json()
++    processed = process_turn_input(
++        UserTurnInput(raw_text=body["mention"]), workspace=root, cwd=root
++    )
++    assert len(processed.images) == 1
++    assert processed.images[0].asset_id == body["image"]["asset_id"]
++    assert processed.images[0].width == 4
++    assert upload(client, "bad.png", b"fake").status_code == 400
++
++
++def test_upload_validation_and_limits(mobile, monkeypatch):
++    client, root = mobile
++    assert upload(client, ".env", b"secret").status_code == 403
++    assert upload(client, "../escape.txt", b"x").status_code == 400
++    assert (
++        client.post("/v1/threads/a/attachments", json={"name": "x", "data_base64": "!"}).status_code
++        == 400
++    )
++    monkeypatch.setattr(files, "MAX_BYTES", 3)
++    assert upload(client, "x.txt", b"four").status_code == 413
++    (root / "large").write_bytes(b"four")
++    assert client.get("/v1/threads/a/files/content", params={"path": "large"}).status_code == 413
++    monkeypatch.setattr(files, "MAX_BODY", 4)
++    assert client.post("/v1/threads/a/attachments", content=b"12345").status_code == 413
+diff --git a/tests/test_mobile_git.py b/tests/test_mobile_git.py
+new file mode 100644
+index 00000000..a09f2c72
+--- /dev/null
++++ b/tests/test_mobile_git.py
+@@ -0,0 +1,109 @@
++from __future__ import annotations
++
++import os
++import subprocess
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++
++from deepseek_tui.mobile.git import router
++
++
++def git(root, *args):
++    return subprocess.run(
++        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
++    ).stdout.strip()
++
++
++@pytest.fixture
++def mobile_git(tmp_path, monkeypatch):
++    helper = os.environ.get("DEEPSEEK_MOBILE_GIT_HELPER", "")
++    if not helper or not Path(helper).is_file():
++        pytest.skip("Build and set DEEPSEEK_MOBILE_GIT_HELPER to test the original desktop service")
++    monkeypatch.setenv("DEEPSEEK_HOME", str(tmp_path / "home"))
++    root = tmp_path / "repo"
++    root.mkdir()
++    git(root, "init", "-b", "main")
++    git(root, "config", "user.name", "Mobile test")
++    git(root, "config", "user.email", "mobile-test@example.invalid")
++    (root / "hello.txt").write_text("before\n")
++    git(root, "add", "hello.txt")
++    git(root, "commit", "-m", "initial")
++    active = AsyncMock(return_value=False)
++    app = FastAPI()
++    app.state.thread_manager = SimpleNamespace(
++        store=SimpleNamespace(load_thread=lambda _: SimpleNamespace(workspace=str(root))),
++        is_thread_turn_active=active,
++    )
++    app.include_router(router)
++    with TestClient(app) as client:
++        yield client, root, active
++
++
++def test_reused_desktop_git_stage_commit_and_branch(mobile_git):
++    client, root, _ = mobile_git
++    (root / "hello.txt").write_text("after\n")
++    (root / ".env").write_text("DO_NOT_EXPOSE=secret\n")
++    state = client.get("/v1/threads/a/git/changes")
++    assert state.status_code == 200, state.text
++    assert [file["path"] for file in state.json()["files"]] == ["hello.txt"]
++    assert "DO_NOT_EXPOSE" not in state.text
++    patch = client.get("/v1/threads/a/git/diff", params={"path": "hello.txt"})
++    assert "+after" in patch.json()["patch"]
++    assert client.post("/v1/threads/a/git/stage", json={"paths": ["hello.txt"]}).status_code == 409
++    assert (
++        client.post(
++            "/v1/threads/a/git/stage", json={"paths": ["hello.txt"], "confirm": True}
++        ).status_code
++        == 200
++    )
++    (root / "hello.txt").write_text("later unstaged\n")
++    commit = client.post(
++        "/v1/threads/a/git/commit", json={"message": "mobile commit", "confirm": True}
++    )
++    assert commit.status_code == 200, commit.text
++    assert git(root, "show", "HEAD:hello.txt") == "after"
++    assert (root / "hello.txt").read_text() == "later unstaged\n"
++    result = client.post(
++        "/v1/threads/a/git/createBranch", json={"branch": "mobile-test", "confirm": True}
++    )
++    assert result.status_code == 200, result.text
++    assert git(root, "branch", "--show-current") == "mobile-test"
++    assert (
++        client.post(
++            "/v1/threads/a/git/switch", json={"branch": "main", "confirm": True}
++        ).status_code
++        == 200
++    )
++    assert client.get("/v1/threads/a/git/branches").json()["currentBranch"] == "main"
++
++
++def test_blocks_active_sensitive_paths_and_sensitive_staged_commit(mobile_git):
++    client, root, active = mobile_git
++    active.return_value = True
++    assert (
++        client.post(
++            "/v1/threads/a/git/stage", json={"paths": ["hello.txt"], "confirm": True}
++        ).status_code
++        == 409
++    )
++    active.return_value = False
++    for path in (".env", "../escape", ".git/config"):
++        assert client.post(
++            "/v1/threads/a/git/stage", json={"paths": [path], "confirm": True}
++        ).status_code in {400, 403}
++    (root / ".env").write_text("SECRET=not-committed")
++    git(root, "add", ".env")
++    result = client.post("/v1/threads/a/git/commit", json={"message": "must fail", "confirm": True})
++    assert result.status_code == 403
++    assert git(root, "log", "-1", "--format=%s") == "initial"
++    assert (
++        client.post(
++            "/v1/threads/a/git/switch", json={"branch": "--detach", "confirm": True}
++        ).status_code
++        == 400
++    )
+diff --git a/tests/test_mobile_models.py b/tests/test_mobile_models.py
+new file mode 100644
+index 00000000..d67ccfeb
+--- /dev/null
++++ b/tests/test_mobile_models.py
+@@ -0,0 +1,42 @@
++from types import SimpleNamespace
++import httpx
++import pytest
++from fastapi import FastAPI
++from deepseek_tui.config.models import Config, ProviderConfig
++from deepseek_tui.mobile.models import router
++
++
++@pytest.mark.asyncio
++async def test_catalog_returns_only_safe_metadata_and_no_network(monkeypatch):
++    config = Config(provider='deepseek', api_key='never-return-key', model='configured-model', providers={
++        'custom': ProviderConfig(model='custom-default', api_key='private-custom-key', base_url='https://private.example/v1', context_windows={'custom-other': 1024}),
++    })
++    app = FastAPI()
++    app.state.thread_manager = SimpleNamespace(config=config)
++    app.include_router(router)
++    async def no_process(*a, **kw):
++        pytest.fail('Catalog listing must not launch network/helper process')
++    monkeypatch.setattr('asyncio.create_subprocess_exec', no_process)
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
++        response = await client.get('/v1/model-catalog')
++        assert response.status_code == 200
++        assert all(secret not in response.text for secret in ('never-return-key', 'private-custom-key', 'private.example'))
++        rows = {row['id']: row for row in response.json()['providers']}
++        assert rows['custom']['models'] == ['custom-default', 'custom-other']
++        assert rows['deepseek']['models'] == ['configured-model']
++        assert (await client.post('/v1/model-catalog/unknown/refresh')).status_code == 404
++
++
++@pytest.mark.asyncio
++async def test_custom_missing_endpoint_never_falls_back_and_sends_secret_elsewhere(monkeypatch):
++    app = FastAPI()
++    app.state.thread_manager = SimpleNamespace(config=Config(provider='custom', providers={
++        'custom': ProviderConfig(model='model', api_key='custom-key'),
++    }))
++    app.include_router(router)
++    async def no_process(*a, **kw):
++        pytest.fail('Incomplete custom config must not launch a helper')
++    monkeypatch.setattr('asyncio.create_subprocess_exec', no_process)
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
++        assert (await client.get('/v1/model-catalog')).json()['providers'][0]['discoverable'] is False
++        assert (await client.post('/v1/model-catalog/custom/refresh')).status_code == 409
+diff --git a/tests/test_mobile_terminal.py b/tests/test_mobile_terminal.py
+new file mode 100644
+index 00000000..0704d05d
+--- /dev/null
++++ b/tests/test_mobile_terminal.py
+@@ -0,0 +1,83 @@
++"""PTY transport contract checks with isolated workspaces and no model calls."""
++import asyncio
++import os
++from pathlib import Path
++from types import SimpleNamespace
++
++import httpx
++import pytest
++from fastapi import FastAPI
++from deepseek_tui.mobile import terminal as mobile_terminal
++
++
++def app_for(root):
++    app = FastAPI()
++    app.state.thread_manager = SimpleNamespace(store=SimpleNamespace(load_thread=lambda _: SimpleNamespace(workspace=str(root))))
++    app.include_router(mobile_terminal.router)
++    return app
++
++
++@pytest.mark.asyncio
++async def test_create_requires_confirmation_and_pins_workspace(monkeypatch, tmp_path):
++    app = app_for(tmp_path)
++    calls = []
++    async def call(self, payload):
++        calls.append(payload)
++        return {'id': 'test-session'}
++    monkeypatch.setattr(mobile_terminal.TerminalBridge, 'call', call)
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
++        denied = await client.post('/v1/threads/owner/terminal', json={})
++        assert denied.status_code == 400 and not calls
++        created = await client.post('/v1/threads/owner/terminal', json={'confirm': True, 'cwd': '/ignored'})
++        assert created.status_code == 200
++        assert calls[0]['cwd'] == str(tmp_path.resolve())
++        assert calls[0]['thread_id'] == 'owner'
++        invalid = await client.post('/v1/threads/owner/terminal/test-session/resize', json={'cols': 9999, 'rows': 0})
++        assert invalid.status_code == 422
++        excessive = await client.post('/v1/threads/owner/terminal/test-session/input', json={'data': 'x' * 8193})
++        assert excessive.status_code == 422
++
++
++@pytest.mark.asyncio
++async def test_real_shared_pty_owner_resize_buffer_and_shutdown(tmp_path, monkeypatch):
++    helper = os.environ.get('TEST_MOBILE_TERMINAL_HELPER')
++    if not helper or not Path(helper).is_file():
++        pytest.skip('Build the shared PTY helper and set TEST_MOBILE_TERMINAL_HELPER for isolated native test')
++    monkeypatch.setenv('DEEPSEEK_MOBILE_TERMINAL_HELPER', helper)
++    app = app_for(tmp_path)
++    try:
++        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
++            created = await client.post('/v1/threads/owner/terminal', json={'confirm': True})
++            assert created.status_code == 200, created.text
++            session = created.json()['id']
++            path = f'/v1/threads/owner/terminal/{session}'
++            other = await client.post(f'/v1/threads/other/terminal/{session}/input', json={'data': 'echo WRONG\r'})
++            assert other.status_code == 409
++            resized = await client.post(path + '/resize', json={'cols': 70, 'rows': 20})
++            assert resized.status_code == 200
++            await client.post(path + '/input', json={'data': "echo PTY_""OK; pwd\r"})
++            output = ''
++            for _ in range(40):
++                response = await client.get(path)
++                output = response.json()['text']
++                if str(tmp_path.resolve()) in output and 'PTY_OK' in output:
++                    break
++                await asyncio.sleep(.05)
++            assert str(tmp_path.resolve()) in output and 'PTY_OK' in output, output
++            cursor = response.json()['offset']
++            assert (await client.get(path, params={'offset': cursor})).json()['text'] == ''
++            assert (await client.get(f'/v1/threads/other/terminal/{session}')).status_code == 409
++            await client.post(path + '/input', json={'data': "printf '%070000d' 0\r"})
++            for _ in range(60):
++                bounded = (await client.get(path)).json()
++                if bounded['truncated']:
++                    break
++                await asyncio.sleep(.05)
++            assert bounded['truncated'] is True
++            assert len(bounded['text']) <= 65536
++            assert (await client.delete(path)).status_code == 200
++            assert (await client.get(path)).status_code == 409
++            process = app.state.mobile_terminal.process
++    finally:
++        await mobile_terminal.close_mobile_terminals(app)
++    assert process.returncode is not None
+diff --git a/tests/test_mobile_voice.py b/tests/test_mobile_voice.py
+new file mode 100644
+index 00000000..c4f5057f
+--- /dev/null
++++ b/tests/test_mobile_voice.py
+@@ -0,0 +1,65 @@
++"""Offline checks; these never contact a transcription provider."""
++import base64
++import io
++import wave
++
++import httpx
++import pytest
++from fastapi import FastAPI, HTTPException
++from deepseek_tui.mobile import voice as mobile_voice
++
++
++def wav_bytes(seconds=0.1, channels=1):
++    buf = io.BytesIO()
++    with wave.open(buf, 'wb') as wav:
++        wav.setnchannels(channels)
++        wav.setsampwidth(2)
++        wav.setframerate(16000)
++        wav.writeframes(b'\x00\x00' * int(seconds * 16000) * channels)
++    return buf.getvalue()
++
++
++@pytest.mark.parametrize('audio', [b'', b'not-wav', wav_bytes(channels=2), wav_bytes(32)])
++def test_invalid_recordings_rejected(audio):
++    with pytest.raises(HTTPException):
++        mobile_voice.validate_recording(base64.b64encode(audio).decode())
++
++
++def test_recording_length_checked_against_real_frames():
++    audio = wav_bytes()
++    assert mobile_voice.validate_recording(base64.b64encode(audio).decode()) == audio
++    with pytest.raises(HTTPException):
++        mobile_voice.validate_recording(base64.b64encode(audio[:-8]).decode())
++
++
++@pytest.mark.asyncio
++async def test_status_and_upload_forward_only_fixed_audio_fields(monkeypatch):
++    calls = []
++    async def bridge(payload):
++        calls.append(payload)
++        return {'configured': False} if payload['action'] == 'status' else {'ok': True, 'text': '测试录音'}
++    monkeypatch.setattr(mobile_voice, '_bridge', bridge)
++    app = FastAPI()
++    app.include_router(mobile_voice.router)
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
++        assert (await client.get('/v1/voice/status')).json() == {'configured': False}
++        invalid = await client.post('/v1/voice/transcribe', json={'audio': 'no'})
++        assert invalid.status_code == 400
++        encoded = base64.b64encode(wav_bytes()).decode()
++        response = await client.post('/v1/voice/transcribe', json={'audio': encoded, 'apiKey': 'ignored', 'endpoint': 'ignored'})
++        assert response.json() == {'text': '测试录音'}
++        assert calls == [{'action': 'status'}, {'action': 'transcribe', 'audio': encoded}]
++
++
++@pytest.mark.asyncio
++async def test_unconfigured_asr_and_oversize_do_not_report_success(monkeypatch):
++    async def bridge(payload):
++        return {'ok': False, 'code': 'not_configured', 'message': 'ASR 未配置'}
++    monkeypatch.setattr(mobile_voice, '_bridge', bridge)
++    app = FastAPI()
++    app.include_router(mobile_voice.router)
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
++        response = await client.post('/v1/voice/transcribe', json={'audio': base64.b64encode(wav_bytes()).decode()})
++        assert response.status_code == 503
++        oversized = await client.post('/v1/voice/transcribe', content=b'x' * 1400001)
++        assert oversized.status_code == 413
+diff --git a/tests/contract/test_mobile_document_text.py b/tests/contract/test_mobile_document_text.py
+new file mode 100644
+index 00000000..3fefe74b
+--- /dev/null
++++ b/tests/contract/test_mobile_document_text.py
+@@ -0,0 +1,183 @@
++import io
++import zipfile
++
++import pytest
++
++from deepseek_tui.mobile.document_text import MAX_TEXT, extract_document_text
++from deepseek_tui.mobile.files import _upload
++
++
++def test_docx_paragraphs_tables_and_upload_integration(tmp_path):
++    import base64
++
++    from docx import Document
++
++    document = Document()
++    document.add_paragraph("用户上传的项目说明")
++    table = document.add_table(rows=1, cols=2)
++    table.cell(0, 0).text = "范围"
++    table.cell(0, 1).text = "只做离线验证"
++    output = io.BytesIO()
++    document.save(output)
++    result = _upload(
++        tmp_path,
++        "document-thread",
++        {"name": "说明.docx", "data_base64": base64.b64encode(output.getvalue()).decode()},
++    )
++    assert result["parser_available"] is True
++    assert "项目说明" in result["text_preview"] and "范围 | 只做离线验证" in result["text_preview"]
++    assert (tmp_path / result["path"]).is_file()
++    assert result["preview_truncated"] is False
++
++
++def test_xlsx_formulas_are_text_and_rows_are_bounded():
++    from openpyxl import Workbook
++
++    book = Workbook()
++    sheet = book.active
++    sheet.append(["项目", "数值"])
++    sheet.append(["预算", "=1+2"])
++    for i in range(205):
++        sheet.append([f"row{i}", i])
++    output = io.BytesIO()
++    book.save(output)
++    result = extract_document_text(output.getvalue(), "data.xlsx")
++    assert result["parser_available"] is True
++    assert "=1+2" in result["text_preview"]
++    assert "row204" not in result["text_preview"]
++    assert result["preview_truncated"] is True
++
++
++def test_pptx_text_and_table():
++    from pptx import Presentation
++    from pptx.util import Inches
++
++    deck = Presentation()
++    slide = deck.slides.add_slide(deck.slide_layouts[5])
++    slide.shapes.title.text = "实施计划"
++    table = slide.shapes.add_table(1, 2, Inches(1), Inches(2), Inches(4), Inches(1)).table
++    table.cell(0, 0).text = "阶段"
++    table.cell(0, 1).text = "手机联调"
++    output = io.BytesIO()
++    deck.save(output)
++    result = extract_document_text(output.getvalue(), "slides.pptx")
++    assert "实施计划" in result["text_preview"] and "阶段 | 手机联调" in result["text_preview"]
++    assert not result["preview_error"]
++
++
++def test_office_xml_entities_and_zip_bomb_rejected():
++    for payload in [
++        b'<!DOCTYPE doc [<!ENTITY e SYSTEM "file:///etc/passwd">]><doc>&e;</doc>',
++        b"A" * (17 * 1024 * 1024),
++    ]:
++        output = io.BytesIO()
++        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
++            archive.writestr("word/document.xml", payload)
++        result = extract_document_text(output.getvalue(), "unsafe.docx")
++        assert result["text_preview"] == ""
++        assert result["preview_error"]
++
++
++def test_preview_character_limit_and_missing_pdf_parser(monkeypatch):
++    from docx import Document
++
++    document = Document()
++    document.add_paragraph("文字" * (MAX_TEXT + 1))
++    output = io.BytesIO()
++    document.save(output)
++    result = extract_document_text(output.getvalue(), "long.docx")
++    assert len(result["text_preview"]) <= MAX_TEXT and result["preview_truncated"]
++    monkeypatch.setattr("deepseek_tui.mobile.document_text.shutil.which", lambda _: None)
++    monkeypatch.setattr(
++        "deepseek_tui.mobile.document_text.importlib.util.find_spec", lambda _: None
++    )
++    result = extract_document_text(b"%PDF-1.4\n%%EOF", "sample.pdf")
++    assert result["parser_available"] is False and "pdftotext" in result["preview_error"]
++
++
++def test_invalid_file_is_saved_but_reported_without_successful_preview(tmp_path):
++    import base64
++
++    result = _upload(
++        tmp_path,
++        "document-thread",
++        {"name": "broken.docx", "data_base64": base64.b64encode(b"not a zip").decode()},
++    )
++    assert (tmp_path / result["path"]).is_file()
++    assert result["preview_error"] and result["text_preview"] == ""
++
++
++def make_pdf(*, pages=1, encrypted=False, large_stream=False):
++    from pypdf import PdfWriter
++    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
++
++    writer = PdfWriter()
++    font = DictionaryObject(
++        {
++            NameObject("/Type"): NameObject("/Font"),
++            NameObject("/Subtype"): NameObject("/Type1"),
++            NameObject("/BaseFont"): NameObject("/Helvetica"),
++        }
++    )
++    font_ref = writer._add_object(font)
++    for index in range(pages):
++        page = writer.add_blank_page(width=612, height=792)
++        page[NameObject("/Resources")] = DictionaryObject(
++            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
++        )
++        stream = DecodedStreamObject()
++        stream.set_data(
++            (b" " * (5 * 1024 * 1024) if large_stream else b"")
++            + f"BT /F1 12 Tf 72 720 Td (Hello mobile PDF page {index + 1}) Tj ET".encode()
++        )
++        page[NameObject("/Contents")] = writer._add_object(
++            stream.flate_encode() if large_stream else stream
++        )
++    if encrypted:
++        writer.encrypt("private-password")
++    output = io.BytesIO()
++    writer.write(output)
++    return output.getvalue()
++
++
++def test_pdf_actual_text_in_resource_limited_subprocess():
++    pytest.importorskip("pypdf")
++    result = extract_document_text(make_pdf(), "actual.pdf")
++    assert result["parser_available"] is True
++    assert result["preview_error"] is None, result
++    assert "Hello mobile PDF page 1" in result["text_preview"]
++    assert result["preview_truncated"] is False
++
++
++def test_pdf_page_limit_and_encrypted_document():
++    pytest.importorskip("pypdf")
++    result = extract_document_text(make_pdf(pages=21), "long.pdf")
++    assert "page 20" in result["text_preview"] and "page 21" not in result["text_preview"]
++    assert result["preview_truncated"] is True
++    locked = extract_document_text(make_pdf(encrypted=True), "locked.pdf")
++    assert locked["text_preview"] == "" and "密码" in locked["preview_error"]
++
++
++def test_pdf_rejects_large_decompressed_page_and_reports_ocr():
++    pypdf = pytest.importorskip("pypdf")
++    result = extract_document_text(make_pdf(large_stream=True), "compressed.pdf")
++    assert result["text_preview"] == "" and "4 MiB" in result["preview_error"]
++    writer = pypdf.PdfWriter()
++    writer.add_blank_page(width=100, height=100)
++    output = io.BytesIO()
++    writer.write(output)
++    empty = extract_document_text(output.getvalue(), "scan.pdf")
++    assert empty["text_preview"] == "" and "OCR" in empty["preview_error"]
++
++
++def test_pdf_worker_timeout_is_explicit(monkeypatch):
++    import subprocess
++
++    pytest.importorskip("pypdf")
++
++    def timeout(*args, **kwargs):
++        raise subprocess.TimeoutExpired("pdf-worker", 12)
++
++    monkeypatch.setattr("deepseek_tui.mobile.document_text.subprocess.run", timeout)
++    result = extract_document_text(b"%PDF-1.4", "timeout.pdf")
++    assert "超时" in result["preview_error"]
+diff --git a/tests/contract/test_mobile_settings.py b/tests/contract/test_mobile_settings.py
+new file mode 100644
+index 00000000..3e47f028
+--- /dev/null
++++ b/tests/contract/test_mobile_settings.py
+@@ -0,0 +1,157 @@
++import json
++
++import pytest
++from httpx import ASGITransport, AsyncClient
++
++from deepseek_tui.config.models import Config, FeatureConfig
++from deepseek_tui.server.app import build_fastapi_app
++from deepseek_tui.mobile.settings import router
++from deepseek_tui.server.runtime import AppRuntime
++
++
++@pytest.fixture
++async def settings_client(tmp_path, monkeypatch):
++    monkeypatch.setenv("DEEPSEEK_HOME", str(tmp_path / "home"))
++    workspace = tmp_path / "workspace"
++    workspace.mkdir()
++    runtime = AppRuntime(
++        config=Config(
++            features=FeatureConfig(mcp=False, tasks=False, automations=False, subagents=False)
++        ),
++        working_directory=workspace,
++    )
++    app = build_fastapi_app(runtime, http_mode=True, auth_token="test-settings")
++    if not any(r.path == "/v1/mobile-settings/mcp" for r in app.routes):
++        app.include_router(router)
++    async with AsyncClient(
++        transport=ASGITransport(app=app),
++        base_url="http://test",
++        headers={"Authorization": "Bearer test-settings"},
++    ) as client:
++        yield client, tmp_path
++
++
++@pytest.mark.asyncio
++async def test_skills_read_install_untrusted_delete_and_builtin_guard(settings_client):
++    client, root = settings_client
++    source = root / "sample"
++    source.mkdir()
++    (source / "SKILL.md").write_text(
++        "---\nname: Sample\ndescription: Test skill\n---\n# Instructions"
++    )
++    (source / ".trusted").touch()
++    endpoint = "/v1/mobile-settings/skills"
++    assert (
++        await client.post(endpoint + "/install", json={"source": str(source)})
++    ).status_code == 400
++    response = await client.post(
++        endpoint + "/install", json={"source": str(source), "confirm": True}
++    )
++    assert response.status_code == 201, response.text
++    target = root / "home" / "skills" / "sample"
++    assert not (target / ".trusted").exists()
++    response = await client.get(endpoint + "/sample")
++    assert response.json()["content"].endswith("# Instructions")
++    (target / ".system-installed-version").touch()
++    assert (
++        await client.request("DELETE", endpoint + "/sample", json={"confirm": True})
++    ).status_code == 403
++    (target / ".system-installed-version").unlink()
++    assert (
++        await client.request("DELETE", endpoint + "/sample", json={"confirm": True})
++    ).status_code == 200
++    (root / "home" / "skills" / "outside").symlink_to(source, target_is_directory=True)
++    assert (await client.get(endpoint + "/outside")).status_code == 403
++    unauth = await client.get(endpoint, headers={"Authorization": "Bearer wrong"})
++    assert unauth.status_code == 401
++
++
++@pytest.mark.asyncio
++async def test_memory_revision_conflict_and_project_scope(settings_client):
++    client, root = settings_client
++    thread = (await client.post("/v1/threads", json={"title": "memory"})).json()
++    path = f"/v1/mobile-settings/threads/{thread['id']}/memories"
++    response = await client.post(path, json={"content": "Use pytest", "kind": "preference"})
++    assert response.status_code == 200, response.text
++    entry = response.json()
++    updated = await client.patch(
++        path + "/" + entry["id"],
++        json={"content": "Use offline pytest", "revision": entry["revision"]},
++    )
++    assert updated.status_code == 200, updated.text
++    assert (
++        await client.patch(
++            path + "/" + entry["id"], json={"content": "stale", "revision": entry["revision"]}
++        )
++    ).status_code == 409
++    records = (await client.get(path)).json()["entries"]
++    assert records[0]["content"] == "Use offline pytest"
++    assert (
++        await client.request(
++            "DELETE",
++            path + "/" + entry["id"],
++            json={"revision": updated.json()["revision"], "confirm": True},
++        )
++    ).status_code == 200
++    assert (await client.get(path)).json()["entries"] == []
++
++
++@pytest.mark.asyncio
++async def test_mcp_preserves_secrets_redacts_reads_and_rejects_stale_save(settings_client):
++    client, root = settings_client
++    path = root / "home" / "mcp.json"
++    path.parent.mkdir(exist_ok=True)
++    path.write_text(
++        json.dumps(
++            {
++                "mcpServers": {
++                    "docs": {
++                        "url": "https://example.test/mcp?token=secret-query",
++                        "headers": {"Authorization": "secret-header"},
++                        "env": {"TOKEN": "secret-env"},
++                        "enabled": False,
++                    }
++                }
++            }
++        )
++    )
++    endpoint = "/v1/mobile-settings/mcp"
++    before = await client.get(endpoint)
++    assert before.status_code == 200, before.text
++    for secret in ("secret-query", "secret-header", "secret-env"):
++        assert secret not in before.text
++    revision = before.json()["revision"]
++    saved = await client.patch(
++        endpoint + "/docs",
++        json={
++            "revision": revision,
++            "enabled": True,
++            "headers": {"X-New": "new-secret"},
++            "confirm": True,
++        },
++    )
++    assert saved.status_code == 200, saved.text
++    assert saved.json()["restart_required"] is True
++    disk = json.loads(path.read_text())["mcpServers"]["docs"]
++    assert disk["headers"] == {"Authorization": "secret-header", "X-New": "new-secret"}
++    assert disk["env"]["TOKEN"] == "secret-env"
++    assert "new-secret" not in saved.text
++    assert (
++        await client.patch(
++            endpoint + "/docs", json={"revision": revision, "enabled": False, "confirm": True}
++        )
++    ).status_code == 409
++    current = saved.json()["revision"]
++    response = await client.patch(
++        endpoint + "/local",
++        json={
++            "revision": current,
++            "transport": "stdio",
++            "command": "nonexistent-do-not-execute",
++            "args": ["--offline"],
++            "env": {"TOKEN": "private"},
++            "confirm": True,
++        },
++    )
++    assert response.status_code == 200, response.text
++    assert "private" not in response.text
+diff --git a/packages/workbench/src/main/services/terminal-core.ts b/packages/workbench/src/main/services/terminal-core.ts
+new file mode 100644
+index 00000000..6cec529b
+--- /dev/null
++++ b/packages/workbench/src/main/services/terminal-core.ts
+@@ -0,0 +1,226 @@
++import { existsSync } from 'node:fs'
++import { stat } from 'node:fs/promises'
++import { resolve } from 'node:path'
++import { spawn as spawnPty, type IPty } from 'node-pty'
++import { randomUUID } from 'node:crypto'
++import type {
++  TerminalCreateOptions,
++  TerminalCreateResult,
++  TerminalDataPayload,
++  TerminalExitPayload,
++  TerminalInputPayload,
++  TerminalLifecyclePayload,
++  TerminalResizePayload
++} from '../../shared/terminal-session'
++
++type TerminalSessionState = {
++  id: string
++  windowId: number
++  pty: IPty
++  pendingData: string
++  flushTimer: ReturnType<typeof setTimeout> | null
++}
++
++const TERMINAL_DATA_FLUSH_MS = 16
++
++function resolveTerminalShell(): { file: string; args: string[]; name: string } {
++  if (process.platform === 'win32') {
++    const file = process.env.COMSPEC?.trim() || 'cmd.exe'
++    return { file, args: [], name: 'xterm-color' }
++  }
++
++  const shellPath = process.env.SHELL?.trim() || ''
++
++  if (shellPath && existsSync(shellPath)) {
++    return { file: shellPath, args: ['-l'], name: 'xterm-256color' }
++  }
++
++  if (process.platform === 'darwin') {
++    if (existsSync('/bin/zsh')) return { file: '/bin/zsh', args: ['-l'], name: 'xterm-256color' }
++    if (existsSync('/bin/bash')) return { file: '/bin/bash', args: ['-l'], name: 'xterm-256color' }
++  }
++
++  if (existsSync('/bin/bash')) return { file: '/bin/bash', args: ['-l'], name: 'xterm-256color' }
++  if (existsSync('/bin/sh')) return { file: '/bin/sh', args: ['-l'], name: 'xterm-256color' }
++
++  return { file: shellPath || '/bin/bash', args: ['-l'], name: 'xterm-256color' }
++}
++
++function normalizeTerminalDimension(value: number | undefined, fallback: number, minimum = 2): number {
++  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
++  return Math.max(minimum, Math.floor(value))
++}
++
++async function resolveTerminalCwd(raw: string, expandHomePath: (path: string) => string): Promise<string> {
++  const target = resolve(expandHomePath(raw))
++  const info = await stat(target)
++  if (!info.isDirectory()) {
++    throw new Error(`Not a directory: ${raw}`)
++  }
++  return target
++}
++
++export function createTerminalCore<Sender>(transport: {
++  ownerId: (sender: Sender) => number | undefined
++  expandPath: (path: string) => string
++  send: (ownerId: number, channel: 'terminal:data' | 'terminal:exit', payload: TerminalDataPayload | TerminalExitPayload) => boolean
++}) {
++  const terminalSessions = new Map<string, TerminalSessionState>()
++  const sendTerminalEvent = transport.send
++
++  function disposeTerminalSession(sessionId: string): boolean {
++    const session = terminalSessions.get(sessionId)
++    if (!session) return false
++    terminalSessions.delete(sessionId)
++    if (session.flushTimer) {
++      clearTimeout(session.flushTimer)
++      session.flushTimer = null
++    }
++    session.pendingData = ''
++    try {
++      session.pty.kill()
++    } catch {
++      /* ignore cleanup failures */
++    }
++    return true
++  }
++
++  function flushTerminalSessionData(sessionId: string): boolean {
++    const session = terminalSessions.get(sessionId)
++    if (!session) return false
++    if (session.flushTimer) {
++      clearTimeout(session.flushTimer)
++      session.flushTimer = null
++    }
++    if (!session.pendingData) return true
++    const data = session.pendingData
++    session.pendingData = ''
++    if (!sendTerminalEvent(session.windowId, 'terminal:data', { sessionId, data })) {
++      disposeTerminalSession(sessionId)
++      return false
++    }
++    return true
++  }
++
++  function scheduleTerminalSessionFlush(sessionId: string): void {
++    const session = terminalSessions.get(sessionId)
++    if (!session || session.flushTimer) return
++    session.flushTimer = setTimeout(() => {
++      const next = terminalSessions.get(sessionId)
++      if (!next) return
++      next.flushTimer = null
++      void flushTerminalSessionData(sessionId)
++    }, TERMINAL_DATA_FLUSH_MS)
++  }
++
++  function disposeTerminalSessionsForWindow(windowId: number): void {
++    for (const [sessionId, session] of terminalSessions.entries()) {
++      if (session.windowId === windowId) {
++        disposeTerminalSession(sessionId)
++      }
++    }
++  }
++
++  async function createTerminalSession(
++    sender: Sender,
++    options: TerminalCreateOptions
++  ): Promise<TerminalCreateResult> {
++    try {
++      const cwd = await resolveTerminalCwd(options.cwd, transport.expandPath)
++      const windowId = transport.ownerId(sender)
++      if (!windowId) {
++        throw new Error('Could not resolve the current window.')
++      }
++
++      const shellConfig = resolveTerminalShell()
++      const sessionId = randomUUID()
++      const cols = normalizeTerminalDimension(options.cols, 120)
++      const rows = normalizeTerminalDimension(options.rows, 32, 1)
++      const env = {
++        ...process.env,
++        TERM: shellConfig.name,
++        COLORTERM: 'truecolor',
++        // Apps launched from Finder/Dock get no locale; without it the shell
++        // falls back to C and mangles CJK/Unicode output.
++        ...(process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE ? {} : { LANG: 'en_US.UTF-8' })
++      }
++
++      const pty = spawnPty(shellConfig.file, shellConfig.args, {
++        name: shellConfig.name,
++        cwd,
++        cols,
++        rows,
++        env
++      })
++
++      terminalSessions.set(sessionId, {
++        id: sessionId,
++        windowId,
++        pty,
++        pendingData: '',
++        flushTimer: null
++      })
++
++      pty.onData((data) => {
++        const session = terminalSessions.get(sessionId)
++        if (!session) return
++        session.pendingData += data
++        scheduleTerminalSessionFlush(sessionId)
++      })
++
++      pty.onExit(({ exitCode, signal }) => {
++        flushTerminalSessionData(sessionId)
++        const session = terminalSessions.get(sessionId)
++        if (session?.flushTimer) {
++          clearTimeout(session.flushTimer)
++          session.flushTimer = null
++        }
++        terminalSessions.delete(sessionId)
++        sendTerminalEvent(windowId, 'terminal:exit', { sessionId, exitCode, signal })
++      })
++
++      return {
++        ok: true,
++        session: {
++          id: sessionId,
++          cwd,
++          shell: shellConfig.file
++        }
++      }
++    } catch (error) {
++      return {
++        ok: false,
++        message: error instanceof Error ? error.message : String(error)
++      }
++    }
++  }
++
++  function writeTerminalSession(payload: TerminalInputPayload): boolean {
++    const session = terminalSessions.get(payload.sessionId)
++    if (!session) return false
++    session.pty.write(payload.data)
++    return true
++  }
++
++  function resizeTerminalSession(payload: TerminalResizePayload): boolean {
++    const session = terminalSessions.get(payload.sessionId)
++    if (!session) return false
++    session.pty.resize(
++      normalizeTerminalDimension(payload.cols, session.pty.cols),
++      normalizeTerminalDimension(payload.rows, session.pty.rows, 1)
++    )
++    return true
++  }
++
++  function closeTerminalSession(payload: TerminalLifecyclePayload): boolean {
++    return disposeTerminalSession(payload.sessionId)
++  }
++
++  return {
++    createTerminalSession,
++    writeTerminalSession,
++    resizeTerminalSession,
++    closeTerminalSession,
++    disposeTerminalSessionsForWindow
++  }
++}
+diff --git a/packages/workbench/src/main/services/terminal-core.test.ts b/packages/workbench/src/main/services/terminal-core.test.ts
+new file mode 100644
+index 00000000..158e9f08
+--- /dev/null
++++ b/packages/workbench/src/main/services/terminal-core.test.ts
+@@ -0,0 +1,41 @@
++import { tmpdir } from 'node:os'
++import { afterEach, expect, it, vi } from 'vitest'
++import { createTerminalCore } from './terminal-core'
++
++const callbacks = vi.hoisted(() => ({ data: (_data: string) => {}, exit: (_event: {exitCode: number}) => {} }))
++const pty = vi.hoisted(() => ({ cols: 80, rows: 24, resize: vi.fn(), write: vi.fn(), kill: vi.fn(),
++  onData: vi.fn((callback: (data: string) => void) => { callbacks.data = callback }),
++  onExit: vi.fn((callback: (event: {exitCode: number}) => void) => { callbacks.exit = callback })
++}))
++vi.mock('node-pty', () => ({spawn: () => pty}))
++afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
++
++it('shares owner-specific data, input, exit and cleanup without Electron', async () => {
++  vi.useFakeTimers()
++  const send = vi.fn(() => true)
++  const service = createTerminalCore<number>({ownerId: sender => sender, expandPath: p => p, send})
++  const created = await service.createTerminalSession(17, {cwd: tmpdir()})
++  expect(created.ok).toBe(true)
++  if (!created.ok) return
++  const id = created.session.id
++  callbacks.data('output')
++  vi.advanceTimersByTime(20)
++  expect(send).toHaveBeenCalledWith(17, 'terminal:data', {sessionId: id, data: 'output'})
++  service.writeTerminalSession({sessionId: id, data: '\x03'})
++  expect(pty.write).toHaveBeenCalledWith('\x03')
++  service.disposeTerminalSessionsForWindow(18)
++  expect(pty.kill).not.toHaveBeenCalled()
++  callbacks.exit({exitCode: 0})
++  expect(send).toHaveBeenCalledWith(17, 'terminal:exit', {sessionId: id, exitCode: 0, signal: undefined})
++  expect(service.writeTerminalSession({sessionId: id, data: 'no'})).toBe(false)
++})
++
++it('kills the PTY when its output transport is gone', async () => {
++  vi.useFakeTimers()
++  const service = createTerminalCore<number>({ownerId: sender => sender, expandPath: p => p, send: () => false})
++  const created = await service.createTerminalSession(3, {cwd: tmpdir()})
++  expect(created.ok).toBe(true)
++  callbacks.data('output')
++  vi.advanceTimersByTime(20)
++  expect(pty.kill).toHaveBeenCalledOnce()
++})

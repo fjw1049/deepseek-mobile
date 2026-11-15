@@ -1,0 +1,10 @@
+import { build } from "esbuild";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdir } from "node:fs/promises";
+const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const source = resolve(process.env.RUNTIME_SOURCE || resolve(app, "../deepseek-tui-py-main"));
+const outfile = resolve(app, ".runtime/git-helper.mjs");
+await mkdir(dirname(outfile), {recursive:true});
+await build({entryPoints:[resolve(app,"scripts/git-helper-entry.ts")],outfile,bundle:true,platform:"node",format:"esm",target:"node20",alias:{"runtime-git-service":resolve(source,"packages/workbench/src/main/services/git-service.ts")}});
+console.log(`Git helper built: ${outfile}`);

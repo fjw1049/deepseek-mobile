@@ -1,0 +1,1498 @@
+[
+  {
+    "file": "src/deepseek_tui/server/share_routes.py",
+    "line": 155,
+    "router": "router",
+    "method": "GET",
+    "path": "/settings",
+    "handler": "get_settings"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_routes.py",
+    "line": 165,
+    "router": "router",
+    "method": "PUT",
+    "path": "/settings",
+    "handler": "save_settings"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_routes.py",
+    "line": 180,
+    "router": "router",
+    "method": "POST",
+    "path": "/shares",
+    "handler": "create_share"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_routes.py",
+    "line": 220,
+    "router": "router",
+    "method": "POST",
+    "path": "/preview",
+    "handler": "preview"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_routes.py",
+    "line": 239,
+    "router": "router",
+    "method": "POST",
+    "path": "/restore",
+    "handler": "restore"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_routes.py",
+    "line": 280,
+    "router": "router",
+    "method": "POST",
+    "path": "/revoke",
+    "handler": "revoke"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 31,
+    "router": "router",
+    "method": "GET",
+    "path": "",
+    "handler": "state"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 46,
+    "router": "router",
+    "method": "GET",
+    "path": "/settings",
+    "handler": "browser_settings"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 52,
+    "router": "router",
+    "method": "POST",
+    "path": "/settings",
+    "handler": "set_browser_settings"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 61,
+    "router": "router",
+    "method": "POST",
+    "path": "/settings/revoke",
+    "handler": "revoke_browser_site"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 72,
+    "router": "router",
+    "method": "GET",
+    "path": "/frame",
+    "handler": "frame"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 80,
+    "router": "router",
+    "method": "GET",
+    "path": "/view",
+    "handler": "view"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 89,
+    "router": "router",
+    "method": "POST",
+    "path": "/input",
+    "handler": "browser_input"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 99,
+    "router": "router",
+    "method": "POST",
+    "path": "/action",
+    "handler": "action"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 116,
+    "router": "router",
+    "method": "POST",
+    "path": "/attach",
+    "handler": "attach"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 128,
+    "router": "router",
+    "method": "GET",
+    "path": "/operations/{action_id}",
+    "handler": "operation"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 155,
+    "router": "router",
+    "method": "GET",
+    "path": "/cookie-sync",
+    "handler": "cookie_sync_state"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 168,
+    "router": "router",
+    "method": "GET",
+    "path": "/cookie-sync/sites",
+    "handler": "cookie_sync_sites"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 184,
+    "router": "router",
+    "method": "POST",
+    "path": "/cookie-sync",
+    "handler": "cookie_sync"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 224,
+    "router": "router",
+    "method": "GET",
+    "path": "/environment",
+    "handler": "environment"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 229,
+    "router": "router",
+    "method": "GET",
+    "path": "/installation",
+    "handler": "installation_status"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 238,
+    "router": "router",
+    "method": "POST",
+    "path": "/installation",
+    "handler": "install_browser"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 257,
+    "router": "router",
+    "method": "POST",
+    "path": "/skills",
+    "handler": "workflow_skill"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 272,
+    "router": "router",
+    "method": "GET",
+    "path": "/preferences",
+    "handler": "preferences"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 277,
+    "router": "router",
+    "method": "POST",
+    "path": "/preferences",
+    "handler": "configure"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 285,
+    "router": "router",
+    "method": "POST",
+    "path": "/recover",
+    "handler": "recover"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 298,
+    "router": "router",
+    "method": "POST",
+    "path": "/clear-profile",
+    "handler": "clear_profile"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 307,
+    "router": "router",
+    "method": "GET",
+    "path": "/workflows",
+    "handler": "workflows"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 334,
+    "router": "router",
+    "method": "POST",
+    "path": "/workflows",
+    "handler": "workflow"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 361,
+    "router": "router",
+    "method": "POST",
+    "path": "/control",
+    "handler": "control"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 372,
+    "router": "router",
+    "method": "GET",
+    "path": "/artifacts/{name}",
+    "handler": "artifact"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 382,
+    "router": "router",
+    "method": "POST",
+    "path": "/export",
+    "handler": "export_evidence"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 399,
+    "router": "workbench_router",
+    "method": "POST",
+    "path": "",
+    "handler": "register_workbench"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 406,
+    "router": "workbench_router",
+    "method": "DELETE",
+    "path": "",
+    "handler": "unregister_workbench"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 415,
+    "router": "assistance_router",
+    "method": "GET",
+    "path": "",
+    "handler": "pending_assistance"
+  },
+  {
+    "file": "src/deepseek_tui/server/browser_routes.py",
+    "line": 426,
+    "router": "router",
+    "method": "POST",
+    "path": "/assistance",
+    "handler": "respond_assistance"
+  },
+  {
+    "file": "src/deepseek_tui/server/external_session_routes.py",
+    "line": 28,
+    "router": "router",
+    "method": "POST",
+    "path": "/scan",
+    "handler": "scan"
+  },
+  {
+    "file": "src/deepseek_tui/server/external_session_routes.py",
+    "line": 39,
+    "router": "router",
+    "method": "POST",
+    "path": "/import",
+    "handler": "import_one"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 51,
+    "router": "app",
+    "method": "GET",
+    "path": "/",
+    "handler": "runtime_api_root"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 114,
+    "router": "router",
+    "method": "GET",
+    "path": "/healthz",
+    "handler": "healthz"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 119,
+    "router": "router",
+    "method": "POST",
+    "path": "/thread",
+    "handler": "thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 125,
+    "router": "router",
+    "method": "POST",
+    "path": "/app",
+    "handler": "app"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 131,
+    "router": "router",
+    "method": "POST",
+    "path": "/prompt",
+    "handler": "prompt"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 137,
+    "router": "router",
+    "method": "POST",
+    "path": "/prompt/stream",
+    "handler": "prompt_stream"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 144,
+    "router": "router",
+    "method": "POST",
+    "path": "/tool",
+    "handler": "tool"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 150,
+    "router": "router",
+    "method": "GET",
+    "path": "/jobs",
+    "handler": "jobs"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 155,
+    "router": "router",
+    "method": "POST",
+    "path": "/mcp/startup",
+    "handler": "mcp_startup"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 162,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads",
+    "handler": "create_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 174,
+    "router": "router",
+    "method": "GET",
+    "path": "/threads",
+    "handler": "list_threads"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 188,
+    "router": "router",
+    "method": "GET",
+    "path": "/threads/{thread_id}",
+    "handler": "get_thread_detail"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 199,
+    "router": "router",
+    "method": "PATCH",
+    "path": "/threads/{thread_id}",
+    "handler": "update_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 214,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/fork",
+    "handler": "fork_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 229,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/turns",
+    "handler": "start_turn"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 244,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/turns/{turn_id}/interrupt",
+    "handler": "interrupt_turn"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 257,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/turns/{turn_id}/steer",
+    "handler": "steer_turn"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 274,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/compact",
+    "handler": "compact_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 289,
+    "router": "router",
+    "method": "GET",
+    "path": "/threads/{thread_id}/events",
+    "handler": "get_events"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 302,
+    "router": "router",
+    "method": "GET",
+    "path": "/threads/{thread_id}/events/stream",
+    "handler": "stream_events"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 344,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/resume",
+    "handler": "resume_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 355,
+    "router": "router",
+    "method": "GET",
+    "path": "/threads/summary",
+    "handler": "threads_summary"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 369,
+    "router": "router",
+    "method": "GET",
+    "path": "/skills",
+    "handler": "list_skills"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 374,
+    "router": "router",
+    "method": "GET",
+    "path": "/tasks",
+    "handler": "list_tasks"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 385,
+    "router": "router",
+    "method": "GET",
+    "path": "/tasks/{task_id}",
+    "handler": "get_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 390,
+    "router": "router",
+    "method": "POST",
+    "path": "/tasks/{task_id}/cancel",
+    "handler": "cancel_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 395,
+    "router": "router",
+    "method": "POST",
+    "path": "/tasks/{task_id}/resume",
+    "handler": "resume_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 404,
+    "router": "router",
+    "method": "POST",
+    "path": "/threads/{thread_id}/agents/{agent_id}/resume",
+    "handler": "resume_thread_agent"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 421,
+    "router": "router",
+    "method": "GET",
+    "path": "/apps/mcp/servers",
+    "handler": "list_mcp_servers_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 426,
+    "router": "router",
+    "method": "GET",
+    "path": "/apps/mcp/tools",
+    "handler": "list_mcp_tools_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/app.py",
+    "line": 431,
+    "router": "router",
+    "method": "GET",
+    "path": "/workspace/status",
+    "handler": "workspace_status_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_service.py",
+    "line": 65,
+    "router": "app",
+    "method": "GET",
+    "path": "/health",
+    "handler": "health"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_service.py",
+    "line": 69,
+    "router": "app",
+    "method": "POST",
+    "path": "/v1/shares",
+    "handler": "create"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_service.py",
+    "line": 94,
+    "router": "app",
+    "method": "GET",
+    "path": "/v1/shares/{token}",
+    "handler": "get"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_service.py",
+    "line": 105,
+    "router": "app",
+    "method": "DELETE",
+    "path": "/v1/shares/{token}",
+    "handler": "delete"
+  },
+  {
+    "file": "src/deepseek_tui/server/share_service.py",
+    "line": 111,
+    "router": "app",
+    "method": "GET",
+    "path": "/s/{token}",
+    "handler": "landing"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 251,
+    "router": "router_approvals",
+    "method": "GET",
+    "path": "/approvals/pending",
+    "handler": "list_pending_approvals"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 258,
+    "router": "router_approvals",
+    "method": "POST",
+    "path": "/approvals/{approval_id}",
+    "handler": "decide_approval"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 370,
+    "router": "router_automation",
+    "method": "POST",
+    "path": "/v1/triggers",
+    "handler": "post_trigger"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 416,
+    "router": "ingress_router",
+    "method": "POST",
+    "path": "/feishu/inbound",
+    "handler": "feishu_inbound"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 451,
+    "router": "ingress_router",
+    "method": "POST",
+    "path": "/feishu/test-send",
+    "handler": "feishu_test_send"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 478,
+    "router": "ingress_router",
+    "method": "POST",
+    "path": "/email/test-send",
+    "handler": "email_test_send"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 499,
+    "router": "ingress_router",
+    "method": "POST",
+    "path": "/wecom/test-send",
+    "handler": "wecom_test_send"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 509,
+    "router": "automations_router",
+    "method": "GET",
+    "path": "",
+    "handler": "list_automations"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 516,
+    "router": "automations_router",
+    "method": "POST",
+    "path": "",
+    "handler": "create_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 529,
+    "router": "automations_router",
+    "method": "GET",
+    "path": "/{automation_id}",
+    "handler": "get_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 539,
+    "router": "automations_router",
+    "method": "PATCH",
+    "path": "/{automation_id}",
+    "handler": "update_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 553,
+    "router": "automations_router",
+    "method": "GET",
+    "path": "/{automation_id}/permissions",
+    "handler": "automation_permissions"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 553,
+    "router": "automations_router",
+    "method": "PUT",
+    "path": "/{automation_id}/permissions",
+    "handler": "automation_permissions"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 561,
+    "router": "automations_router",
+    "method": "DELETE",
+    "path": "/{automation_id}",
+    "handler": "delete_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 571,
+    "router": "automations_router",
+    "method": "POST",
+    "path": "/{automation_id}/run",
+    "handler": "run_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 581,
+    "router": "automations_router",
+    "method": "POST",
+    "path": "/{automation_id}/pause",
+    "handler": "pause_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 591,
+    "router": "automations_router",
+    "method": "POST",
+    "path": "/{automation_id}/resume",
+    "handler": "resume_automation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 601,
+    "router": "automations_router",
+    "method": "GET",
+    "path": "/{automation_id}/runs",
+    "handler": "list_automation_runs"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 612,
+    "router": "automations_router",
+    "method": "POST",
+    "path": "/{automation_id}/runs/{run_id}/discussion",
+    "handler": "open_automation_discussion"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 627,
+    "router": "automations_router",
+    "method": "GET",
+    "path": "/deliveries/pending",
+    "handler": "pending_automation_deliveries"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 634,
+    "router": "automations_router",
+    "method": "POST",
+    "path": "/{automation_id}/runs/{run_id}/delivery",
+    "handler": "resolve_automation_delivery"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 655,
+    "router": "router_elevations",
+    "method": "GET",
+    "path": "/elevations/pending",
+    "handler": "list_pending_elevations"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 662,
+    "router": "router_elevations",
+    "method": "POST",
+    "path": "/elevations/{elevation_id}",
+    "handler": "decide_elevation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 691,
+    "router": "router_events",
+    "method": "GET",
+    "path": "/threads/{thread_id}/events",
+    "handler": "stream_events"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 727,
+    "router": "router_events",
+    "method": "GET",
+    "path": "/items/{item_id}",
+    "handler": "get_item"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 742,
+    "router": "router_health",
+    "method": "GET",
+    "path": "/health",
+    "handler": "health"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 747,
+    "router": "router_health",
+    "method": "GET",
+    "path": "/healthz",
+    "handler": "healthz_alias"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 752,
+    "router": "router_health",
+    "method": "GET",
+    "path": "/health/ready",
+    "handler": "health_ready"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 773,
+    "router": "router_jobs",
+    "method": "GET",
+    "path": "/jobs",
+    "handler": "list_jobs"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 792,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/threads/{thread_id}/cua",
+    "handler": "cua_thread_state"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 803,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/threads/{thread_id}/cua/control",
+    "handler": "cua_thread_control"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 822,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/threads/{thread_id}/cua/frame",
+    "handler": "cua_current_frame"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 832,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/threads/{thread_id}/cua/raised",
+    "handler": "cua_thread_app_raised"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 842,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/tasks",
+    "handler": "cua_desktop_tasks"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 860,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/tasks/{key}/frame",
+    "handler": "cua_ticket_frame"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 878,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/tasks/{key}/{action}",
+    "handler": "control_cua_desktop_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 887,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/status",
+    "handler": "cua_status"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 950,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/setup",
+    "handler": "cua_setup_state"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 973,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/setup/lcu",
+    "handler": "cua_setup_install_lcu"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 991,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/setup/chrome",
+    "handler": "cua_setup_chrome"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 998,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/setup/chrome/verify",
+    "handler": "cua_setup_chrome_verify"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1013,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/apps",
+    "handler": "cua_apps"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1027,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/apps/available",
+    "handler": "cua_apps_available"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1035,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/apps/allow",
+    "handler": "cua_apps_allow"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1050,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/apps/revoke",
+    "handler": "cua_apps_revoke"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1096,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/frames/{item_id}/{asset_id}",
+    "handler": "cua_preview_frame"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1149,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/cua/permissions",
+    "handler": "cua_permissions"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1165,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/cua/permissions/open",
+    "handler": "cua_permissions_open"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1189,
+    "router": "router_mcp",
+    "method": "POST",
+    "path": "/mcp/startup",
+    "handler": "mcp_startup"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1195,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/mcp/preload-status",
+    "handler": "mcp_preload_status"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1201,
+    "router": "router_mcp",
+    "method": "GET",
+    "path": "/mcp/servers",
+    "handler": "mcp_servers"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1225,
+    "router": "router_sessions",
+    "method": "GET",
+    "path": "/sessions",
+    "handler": "list_sessions"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1237,
+    "router": "router_sessions",
+    "method": "POST",
+    "path": "/threads/{thread_id}/export-session",
+    "handler": "export_session"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1272,
+    "router": "router_skills",
+    "method": "GET",
+    "path": "/skills",
+    "handler": "list_skills"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1332,
+    "router": "router_skills",
+    "method": "GET",
+    "path": "/plugins",
+    "handler": "list_plugins"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1356,
+    "router": "router_skills",
+    "method": "POST",
+    "path": "/plugins/inspect",
+    "handler": "inspect_plugin_source"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1379,
+    "router": "router_skills",
+    "method": "GET",
+    "path": "/plugins/registry",
+    "handler": "plugin_registry_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1405,
+    "router": "router_skills",
+    "method": "POST",
+    "path": "/plugins/install",
+    "handler": "install_plugin_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1433,
+    "router": "router_skills",
+    "method": "POST",
+    "path": "/plugins/{name}/action",
+    "handler": "plugin_action_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1511,
+    "router": "router_skills",
+    "method": "DELETE",
+    "path": "/plugins/{name}",
+    "handler": "remove_plugin_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1561,
+    "router": "router_skills",
+    "method": "GET",
+    "path": "/plugins/marketplaces",
+    "handler": "list_marketplaces_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1566,
+    "router": "router_skills",
+    "method": "POST",
+    "path": "/plugins/marketplaces",
+    "handler": "add_marketplace_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1581,
+    "router": "router_skills",
+    "method": "POST",
+    "path": "/plugins/marketplaces/{name}/update",
+    "handler": "update_marketplace_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1592,
+    "router": "router_skills",
+    "method": "DELETE",
+    "path": "/plugins/marketplaces/{name}",
+    "handler": "remove_marketplace_route"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1609,
+    "router": "router_tasks",
+    "method": "GET",
+    "path": "/tasks",
+    "handler": "list_tasks"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1621,
+    "router": "router_tasks",
+    "method": "GET",
+    "path": "/tasks/{task_id}",
+    "handler": "get_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1631,
+    "router": "router_tasks",
+    "method": "GET",
+    "path": "/tasks/{task_id}/conversation",
+    "handler": "get_task_conversation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1646,
+    "router": "router_tasks",
+    "method": "POST",
+    "path": "/tasks/{task_id}/cancel",
+    "handler": "cancel_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1656,
+    "router": "router_tasks",
+    "method": "POST",
+    "path": "/tasks/{task_id}/resume",
+    "handler": "resume_task"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1681,
+    "router": "router_tasks",
+    "method": "GET",
+    "path": "/tasks/{task_id}/files",
+    "handler": "task_file_restore"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1681,
+    "router": "router_tasks",
+    "method": "POST",
+    "path": "/tasks/{task_id}/files/restore",
+    "handler": "task_file_restore"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1706,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/usage",
+    "handler": "thread_usage"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1743,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads",
+    "handler": "list_threads"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1775,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads",
+    "handler": "create_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1787,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/import-session",
+    "handler": "import_tui_session"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1801,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/summary",
+    "handler": "threads_summary"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1807,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/purge-archived",
+    "handler": "purge_archived_threads"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1814,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}/active",
+    "handler": "thread_turn_active"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1824,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/warmup",
+    "handler": "warmup_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1833,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}",
+    "handler": "get_thread_detail"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1843,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}/context",
+    "handler": "get_thread_context"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1853,
+    "router": "router_threads",
+    "method": "PATCH",
+    "path": "/threads/{thread_id}",
+    "handler": "update_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1867,
+    "router": "router_threads",
+    "method": "DELETE",
+    "path": "/threads/{thread_id}",
+    "handler": "delete_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1892,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/fork",
+    "handler": "fork_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1906,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}/environment",
+    "handler": "get_thread_environment"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1915,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}/worktree/compare",
+    "handler": "compare_thread_publish"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1925,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/worktree/resolve",
+    "handler": "resolve_thread_publish"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1952,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/rewind",
+    "handler": "rewind_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1975,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/restore-code",
+    "handler": "restore_code"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 1992,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}/rewind-preview",
+    "handler": "rewind_preview"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2005,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/resume",
+    "handler": "resume_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2015,
+    "router": "router_threads",
+    "method": "GET",
+    "path": "/threads/{thread_id}/agents/{agent_id}/conversation",
+    "handler": "get_agent_conversation"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2025,
+    "router": "router_threads",
+    "method": "POST",
+    "path": "/threads/{thread_id}/agents/{agent_id}/resume",
+    "handler": "resume_thread_agent"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2053,
+    "router": "router_turns",
+    "method": "POST",
+    "path": "/threads/{thread_id}/goal",
+    "handler": "apply_goal_command"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2067,
+    "router": "router_turns",
+    "method": "POST",
+    "path": "/threads/{thread_id}/turns",
+    "handler": "start_turn"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2088,
+    "router": "router_turns",
+    "method": "POST",
+    "path": "/threads/{thread_id}/turns/{turn_id}/interrupt",
+    "handler": "interrupt_turn"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2100,
+    "router": "router_turns",
+    "method": "POST",
+    "path": "/threads/{thread_id}/turns/{turn_id}/steer",
+    "handler": "steer_turn"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2114,
+    "router": "router_turns",
+    "method": "POST",
+    "path": "/threads/{thread_id}/compact",
+    "handler": "compact_thread"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2135,
+    "router": "router_user_inputs",
+    "method": "GET",
+    "path": "/user-inputs/pending",
+    "handler": "list_pending_user_inputs"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2148,
+    "router": "router_user_inputs",
+    "method": "POST",
+    "path": "/user-inputs/{request_id}",
+    "handler": "user_input_response"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2148,
+    "router": "router_user_inputs",
+    "method": "POST",
+    "path": "/user-input/{request_id}",
+    "handler": "user_input_response"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2173,
+    "router": "router_workspace",
+    "method": "GET",
+    "path": "/workspace/status",
+    "handler": "workspace_status"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2213,
+    "router": "router_data",
+    "method": "GET",
+    "path": "/inventory",
+    "handler": "data_inventory"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2219,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/optimize",
+    "handler": "data_optimize"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2225,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/clean",
+    "handler": "data_clean"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2238,
+    "router": "router_data",
+    "method": "GET",
+    "path": "/clean/preview",
+    "handler": "data_clean_preview"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2246,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/clear-history",
+    "handler": "data_clear_history"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2255,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/export",
+    "handler": "data_export"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2268,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/import/inspect",
+    "handler": "data_import_inspect"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2281,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/import",
+    "handler": "data_import"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2300,
+    "router": "router_data",
+    "method": "GET",
+    "path": "/backup",
+    "handler": "data_backup_status"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2306,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/backup/directory",
+    "handler": "data_backup_set_directory"
+  },
+  {
+    "file": "src/deepseek_tui/server/routes.py",
+    "line": 2317,
+    "router": "router_data",
+    "method": "POST",
+    "path": "/backup",
+    "handler": "data_backup_now"
+  }
+]
