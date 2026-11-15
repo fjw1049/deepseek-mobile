@@ -175,7 +175,7 @@ export function SessionTools({
               </div>
             ))}
           </dl>
-          <p className="muted">这是 Runtime 的上下文估算，不是账户计费金额。</p>
+          <p className="muted">上下文估算 · 非计费用量</p>
           <button
             disabled={busy || active}
             onClick={() => setConfirm("compact")}

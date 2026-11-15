@@ -84,7 +84,7 @@ export function GoalTools({ client, detail, onChanged }: Props) {
     <div className="sheet-form">
       {a.messages}
       {!goal ? (
-        <p>当前没有目标。在聊天输入框选择“目标”后发送目标说明。</p>
+        <p>暂无目标。在输入框选择「目标」开始。</p>
       ) : (
         <>
           <p>{str(goal.objective)}</p>
@@ -247,7 +247,7 @@ export function GoalTools({ client, detail, onChanged }: Props) {
                 />
               </label>
               <p className="muted">
-                当前目标完成后，Runtime 可继续执行队列并使用模型额度。
+                完成当前目标后继续执行，按模型用量计费。
               </p>
               <button disabled={a.busy || !objective.trim()}>
                 加入目标队列
@@ -439,7 +439,7 @@ export function SharingTools({ client, detail, onOpenThread }: Props) {
       {a.messages}
       <h3>创建分享链接</h3>
       <p className="muted">
-        会话快照会上传至电脑配置的分享服务。持有链接的人可读取内容。
+        会话将上传至分享服务，持链接者可阅读。
       </p>
       <button
         disabled={a.busy}

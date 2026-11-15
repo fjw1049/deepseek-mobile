@@ -172,7 +172,7 @@ export function SkillManagement({
             />
           </label>
           <p className="muted">
-            仅安装到电脑用户技能目录，不授予脚本信任；内置技能禁止删除。
+            安装到电脑用户目录，默认不授信。
           </p>
           <label style={{ display: "flex", gap: 8 }}>
             <input
@@ -432,8 +432,7 @@ export function McpManagement({
       <div className="sheet-form">
         {a.messages}
         <p className="muted">
-          配置保存在电脑。保存不会启动进程或连接服务；需要重启 Runtime
-          才会读取修改，再单独启动连接器。密钥、完整 URL 和命令参数不回传手机。
+          保存后需重启电脑服务，再启动连接器。
         </p>
         <button disabled={a.busy} onClick={() => void a.run(load)}>
           刷新 MCP 配置

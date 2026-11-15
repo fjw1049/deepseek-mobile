@@ -18,7 +18,7 @@ export function PairingPanel({
 }: {
   connect: (client: RuntimeClient) => Promise<void>;
 }) {
-  const [url, setUrl] = useState(""),
+  const [url, setUrl] = useState(localStorage.getItem("runtime-url") ?? ""),
     [name, setName] = useState("我的手机"),
     [code, setCode] = useState("");
   const [busy, setBusy] = useState(false),
@@ -33,16 +33,14 @@ export function PairingPanel({
     save: boolean,
   ) => {
     if (save) await saveDeviceCredential(value);
+    localStorage.setItem("runtime-url", value.url);
     await connect(new RuntimeClient(value.url, value.token));
     setPending(null);
   };
   return (
     <section className="record-card" aria-label="配对电脑">
-      <h2>配对电脑</h2>
-      <p className="muted">
-        在电脑端使用管理员连接打开「设备管理」，生成配对码。每个配对码仅用一次，5
-        分钟内有效。
-      </p>
+      <h2>首次配对</h2>
+      <p className="muted">在电脑「设备管理」获取地址与配对码。</p>
       <form
         className="sheet-form"
         onSubmit={async (event) => {
@@ -84,6 +82,7 @@ export function PairingPanel({
             autoCorrect="off"
           />
         </label>
+        <details className="pairing-options"><summary>设备名称（可选）</summary>
         <label>
           设备名称
           <input
@@ -93,6 +92,7 @@ export function PairingPanel({
             onChange={(e) => setName(e.target.value)}
           />
         </label>
+        </details>
         <label>
           一次性配对码
           <input
@@ -101,12 +101,12 @@ export function PairingPanel({
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="ABCDEF-GHJKLM"
-            autoComplete="off"
+            autoComplete="one-time-code"
             autoCapitalize="characters"
           />
         </label>
         <button className="primary" disabled={busy || !!pending}>
-          配对并连接
+          {busy ? "正在连接…" : "配对并连接"}
         </button>
       </form>
       {error && (
@@ -258,7 +258,7 @@ export function DeviceTools({ client }: { client: RuntimeClient }) {
       {role === "device" ? (
         <article className="record-card">
           <h3>{current?.name || "当前设备"}</h3>
-          <p>此手机已配对。添加或撤销设备请在电脑端使用管理员连接操作。</p>
+          <p>已配对 · 设备管理请在电脑操作</p>
         </article>
       ) : role === "admin" ? (
         <>
@@ -326,7 +326,7 @@ export function DeviceTools({ client }: { client: RuntimeClient }) {
               aria-label="撤销设备确认"
             >
               <h3>撤销 {review.name}？</h3>
-              <p>该设备将无法继续访问电脑，现有事件连接也会在数秒内断开。</p>
+              <p>撤销后，该设备将断开并失去访问权限。</p>
               <div className="actions">
                 <button disabled={busy} onClick={() => setReview(null)}>
                   取消

@@ -169,8 +169,7 @@ export function VoiceInput({
             </header>
             <div className="sheet-form">
               <p className="muted">
-                录音最多 30
-                秒。录完后点击转写才会上传到电脑配置的语音服务；文字会填入输入框，由你确认发送。
+                最长 30 秒 · 转写后确认发送
               </p>
               {configured === null && !error && (
                 <p role="status">正在检查电脑语音服务…</p>

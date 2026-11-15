@@ -127,11 +127,7 @@ export function NativeNotificationSettings() {
     <section className="record-card" aria-label="本地通知设置">
       <h3>本地通知</h3>
       <p className="muted">
-        提醒当前已连接会话的执行完成、审批和追问。通知不显示对话正文或工具参数。
-      </p>
-      <p className="muted">
-        这是设备本地通知，不是后台推送。App
-        被系统挂起、电脑离线或连接断开时，无法可靠收到提醒。
+        App 挂起或电脑离线时，可能收不到提醒。
       </p>
       {!native && (
         <p className="muted">请在 iOS 或 Android App 中启用本地通知。</p>

@@ -65,6 +65,7 @@ export function ExtensionTools({
     setAck(false);
     setPending({ action, row });
   }
+  const filteredRows = rows.filter(row => `${text(row.name)} ${text(row.description)}`.toLowerCase().includes(filter.toLowerCase()));
   const candidates = array(inspection?.packages),
     candidate = candidates[Number(selected)];
   const compatibility = candidate?.compatibility as Data | undefined;
@@ -88,7 +89,7 @@ export function ExtensionTools({
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {payload.ok === false && (
-        <p role="status">{text(payload.error) || "电脑尚未启用此能力"}</p>
+        <details><summary>电脑尚未启用此能力</summary><p>{text(payload.error)}</p></details>
       )}
       <label>
         搜索
@@ -127,7 +128,7 @@ export function ExtensionTools({
               </select>
             </label>
             <p className="muted">
-              本机目录可以先检查兼容性和权限。远程来源由电脑下载安装，默认不授予信任。
+              安装前检查权限，默认不授信。
             </p>
             <button
               disabled={busy || !source.trim()}
@@ -212,7 +213,7 @@ export function ExtensionTools({
       )}
       {resource === "mcp" && (
         <>
-          <p className="muted">连接器在电脑运行。配置和认证请在电脑完成。</p>
+          <p className="muted">在电脑完成配置与认证。</p>
           <div className="actions">
             <button disabled={busy} onClick={() => confirm("startup")}>
               启动已配置的 MCP
@@ -276,24 +277,14 @@ export function ExtensionTools({
           )}
         </>
       )}
-      {resource === "skills" && (
-        <p className="muted">
-          这里显示电脑发现的技能及说明，包括项目与生态目录。下方可以管理电脑用户目录中的技能。
-        </p>
-      )}
-      {rows
-        .filter((row) =>
-          `${text(row.name)} ${text(row.description)}`
-            .toLowerCase()
-            .includes(filter.toLowerCase()),
-        )
+      {filteredRows
         .map((row, i) => (
           <article
             className="record-card"
             key={`${text(row.scope)}-${text(row.name)}-${i}`}
           >
             <h3>{text(row.name)}</h3>
-            <p>{text(row.description)}</p>
+            {text(row.description) && <details className="extension-description"><summary>简介</summary><p>{text(row.description)}</p></details>}
             {resource === "plugins" && (
               <>
                 <p className="muted">
@@ -386,7 +377,7 @@ export function ExtensionTools({
             )}
           </article>
         ))}
-      {!rows.length && <p className="muted">暂无已配置项目。</p>}
+      {!filteredRows.length && <p className="empty">{filter ? "无匹配结果" : "暂无已配置项目"}</p>}
       {Array.isArray(payload.warnings) &&
         payload.warnings.map((warning, i) => <p key={i}>{text(warning)}</p>)}
       {pending && (
@@ -523,7 +514,7 @@ function Permissions({ values }: { values: unknown }) {
         </ul>
       ) : (
         <p className="muted">
-          没有声明权限；这不代表插件代码已经通过安全审查。
+          未声明权限，仍需确认来源可信。
         </p>
       )}
     </div>

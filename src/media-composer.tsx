@@ -182,7 +182,7 @@ export function MediaAttachmentList({
       ))}
       {files.length > 0 && (
         <small>
-          已传到电脑；移除只取消本次引用。已提取的正文会随消息发送；截断或无法解析时会在附件旁说明。
+          已上传 · 移除仅取消引用
         </small>
       )}
     </div>

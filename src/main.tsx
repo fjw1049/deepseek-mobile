@@ -1,3 +1,6 @@
+import { UsageView } from "./usage-view";
+import { connectionFeedback } from "./connection-feedback";
+import { loadDeviceCredential } from "./native-credentials";
 import React, {
   useState,
   useEffect,
@@ -16,6 +19,7 @@ import {
   ArrowUp,
   Square,
   Code2,
+  FileText,
   MessageSquare,
   Activity,
   Folder,
@@ -29,33 +33,28 @@ import {
   Search,
   MoreHorizontal,
   Terminal,
-  Plug,
   Zap,
   Monitor,
   LogOut,
-  GitBranch,
-  Share2,
   Sun,
   Moon,
 } from "lucide-react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { EditMessage } from "./edit-message";
+import { ConversationView, ProcessItem } from "./conversation-view";
 import {
   RuntimeClient,
   ApiError,
   applyEvent,
   type Thread,
   type Detail,
+  type Item,
   type Approval,
   type Elevation,
   type InputRequest,
-  type Item,
 } from "./protocol";
 import {
   AttachmentPicker,
   AttachmentList,
-  CopyButton,
-  CodeBlock,
   composeMessage,
   type TextAttachment,
 } from "./composer-tools";
@@ -91,6 +90,9 @@ import {
 import { PairingPanel, DeviceTools } from "./device-tools";
 import { ModelCatalog } from "./model-catalog";
 import "./style.css";
+import "./app-design.css";
+import { ServiceStatus } from "./service-status";
+import { useKeyboardVisible } from "./keyboard-visible";
 
 type ResumeReview = {
   code?: string;
@@ -167,11 +169,11 @@ function Sheet({
   const dialogRef = useModalFocus(true, close);
   return (
     <div
-      className={`overlay ${title === "执行结果" ? "panel-overlay" : title === "快速选择模型" ? "model-popover-overlay" : ""}`}
+      className={`overlay ${["执行结果", "浏览器"].includes(title) ? "panel-overlay" : title === "快速选择模型" ? "model-popover-overlay" : ""}`}
       onClick={close}
     >
       <section
-        className={`sheet ${title === "执行结果" ? "side-sheet" : title === "快速选择模型" ? "model-popover-sheet" : ""}`}
+        className={`sheet ${["执行结果", "浏览器"].includes(title) ? "side-sheet" : title === "快速选择模型" ? "model-popover-sheet" : ""}`}
         ref={dialogRef}
         tabIndex={-1}
         role="dialog"
@@ -186,15 +188,16 @@ function Sheet({
             <X size={20} />
           </IconButton>
         </header>
-        {children}
+        <div className="sheet-body">{children}</div>
       </section>
     </div>
   );
 }
 function Connection({
-  connect,
+  connect, autoRestore = true,
 }: {
   connect: (client: RuntimeClient) => Promise<void>;
+  autoRestore?: boolean;
 }) {
   const [url, setUrl] = useState(
       localStorage.getItem("runtime-url") ??
@@ -203,18 +206,46 @@ function Connection({
     [token, setToken] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [startup, setStartup] = useState(Capacitor.isNativePlatform() && autoRestore);
+  const [restoreFailed, setRestoreFailed] = useState<ReturnType<typeof connectionFeedback> | null>(null);
+  const [setup, setSetup] = useState(false);
+  const connectRef = useRef(connect);
+  connectRef.current = connect;
+  const restore = async () => {
+    setStartup(true);
+    setRestoreFailed(null);
+    let stage: "credentials" | "network" = "credentials";
+    try {
+      const saved = await loadDeviceCredential();
+      if (!saved) { setSetup(true); return; }
+      stage = "network";
+      await connectRef.current(new RuntimeClient(saved.url, saved.token));
+    } catch (e) {
+      setRestoreFailed(connectionFeedback(e, stage));
+    } finally { setStartup(false); }
+  };
+  useEffect(() => { if (Capacitor.isNativePlatform() && autoRestore) void restore(); }, []);
+  if (startup || (restoreFailed && !setup)) return (
+    <main className="startup-screen">
+      <img className="startup-brand" src="/brand.svg" alt="DeepSeek" />
+      <h1>DeepSeek</h1>
+      <p role="status">{startup ? "正在连接你的电脑…" : restoreFailed?.title}</p>
+      {!startup && <>
+        <p>{restoreFailed?.detail}</p>
+        <button className="primary" onClick={() => void restore()}>重新连接</button>
+        <button onClick={() => setSetup(true)}>更换电脑</button>
+      </>}
+    </main>
+  );
   return (
     <main className="connection">
       <div className="brandmark">
-        <Code2 size={32} />
+        <img src="/brand.svg" alt="DeepSeek" width={64} height={64} />
       </div>
       <div className="eyebrow">DEEPSEEK MOBILE</div>
-      <h1>
-        你的工作台，
-        <br />
-        随身同行。
-      </h1>
-      <p>连接电脑上的 DeepSeek Runtime，继续对话、查看任务，随时做出决定。</p>
+      <h1>连接你的电脑</h1>
+      <PairingPanel connect={connect} />
+      <details className="advanced-connection"><summary>高级连接（地址与令牌）</summary>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -264,74 +295,14 @@ function Connection({
           <ChevronRight size={18} />
         </button>
       </form>
-      <PairingPanel connect={connect} />
+      </details>
       <small>
-        模型在电脑执行。手动输入的令牌仅存本次内存；原生 App
-        的配对凭据保存在系统安全存储中。
+        请保持电脑在线。
       </small>
     </main>
   );
 }
-function ItemView({
-  item,
-  reuse,
-}: {
-  item: Item;
-  reuse?: (text: string) => void;
-}) {
-  const body = item.detail || item.summary;
-  if (item.kind === "user_message")
-    return (
-      <div className="user-message">
-        {body.length > 600 ? (
-          <>
-            <span>{body.slice(0, 240)}…</span>
-            <details>
-              <summary>展开完整消息与附件正文</summary>
-              <div>{body}</div>
-            </details>
-          </>
-        ) : (
-          body
-        )}
-        {reuse && (
-          <button className="reuse-message" onClick={() => reuse(body)}>
-            编辑为新消息
-          </button>
-        )}
-      </div>
-    );
-  if (item.kind === "agent_message")
-    return (
-      <article className="assistant-message">
-        <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>
-          {body}
-        </Markdown>
-        {!active(item.status) && <CopyButton text={body} />}
-      </article>
-    );
-  return (
-    <details className={`tool-card ${item.kind === "error" ? "failed" : ""}`}>
-      <summary>
-        {active(item.status) ? (
-          <span className="loader" />
-        ) : (
-          <Check size={15} />
-        )}
-        <span>
-          {item.kind === "agent_reasoning"
-            ? "思考过程"
-            : item.summary || item.kind}
-        </span>
-        <small>{label[item.status] ?? item.status}</small>
-      </summary>
-      <pre>
-        {body}
-        {item.metadata ? "\n" + pretty(item.metadata) : ""}
-      </pre>
-    </details>
-  );
-}
+
 function AskCard({
   request,
   submit,
@@ -408,6 +379,8 @@ function AskCard({
   );
 }
 function App() {
+  const keyboardVisible = useKeyboardVisible();
+  const [autoRestore, setAutoRestore] = useState(true);
   const [client, setClient] = useState<RuntimeClient | null>(null),
     [threads, setThreads] = useState<Thread[]>([]),
     [selected, setSelected] = useState<string | null>(null),
@@ -417,12 +390,16 @@ function App() {
     [search, setSearch] = useState(""),
     [showArchived, setShowArchived] = useState(false),
     [sheet, setSheet] = useState<
-      "new" | "model" | "model-quick" | "more" | "result" | null
+      "new" | "model" | "model-quick" | "more" | "result" | "browser" | "permissions" | "task-settings" | "edit" | null
     >(null),
     [toast, setToast] = useState(""),
     [busy, setBusy] = useState(false),
     [streamState, setStreamState] = useState("连接中"),
     [resume, setResume] = useState(0);
+  const [editTarget, setEditTarget] = useState<Item | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [resultTurnId, setResultTurnId] = useState<string | undefined>();
+  const [approvalOverrides, setApprovalOverrides] = useState<Record<string, boolean>>({});
   const [prompt, setPrompt] = useState(""),
     [mode, setMode] = useState("agent"),
     [provider, setProvider] = useState(""),
@@ -434,6 +411,7 @@ function App() {
     [questions, setQuestions] = useState<InputRequest[]>([]),
     [elevations, setElevations] = useState<Elevation[]>([]),
     [records, setRecords] = useState<unknown>(null),
+    [recordsResource, setRecordsResource] = useState(""),
     [resource, setResource] = useState("tasks"),
     [resourceError, setResourceError] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -505,6 +483,8 @@ function App() {
   const composerState = useRef({ prompt, attachments, uploaded });
   composerState.current = { prompt, attachments, uploaded };
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLElement>(null);
+  const messageViewportSize = useRef({ width: 0, height: 0 });
   useEffect(() => {
     const el = inputRef.current;
     if (el) {
@@ -525,6 +505,11 @@ function App() {
     }
     const draft = id ? drafts.current[id] : undefined;
     selectedRef.current = id;
+    if (client) {
+      const key = `last-thread:${client.base}`;
+      if (id) localStorage.setItem(key, id);
+      else localStorage.removeItem(key);
+    }
     detailRef.current = null;
     setSelected(id);
     setDetail(null);
@@ -545,6 +530,7 @@ function App() {
   const error = (e: unknown) =>
     setToast(e instanceof Error ? e.message : String(e));
   const run = async (fn: () => Promise<unknown>) => {
+    setToast("");
     setBusy(true);
     try {
       await fn();
@@ -582,6 +568,8 @@ function App() {
       }
       if (sheet) setSheet(null);
       else if (drawer) setDrawer(false);
+      else if (page === "settings" && resource !== "settings") setResource("settings");
+      else if (page === "workspace" && !["files", "changes", "tools"].includes(workspaceView)) setWorkspaceView("tools");
       else if (page !== "chat") setPage("chat");
       else if (selected) switchThread(null);
       else void NativeApp.minimizeApp();
@@ -589,7 +577,7 @@ function App() {
     return () => {
       void sub.then((h) => h.remove());
     };
-  }, [sheet, drawer, page, selected]);
+  }, [sheet, drawer, page, selected, resource, workspaceView]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !e.defaultPrevented) {
@@ -749,6 +737,7 @@ function App() {
               }
             },
           );
+          if (!dead) setStreamState("重新连接中");
         } catch (e) {
           if (dead) return;
           if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -791,6 +780,21 @@ function App() {
         behavior: "auto",
       });
   }, [detail?.items, approvals, questions]);
+  // Keep the last reply visible when the keyboard or a growing draft reduces
+  // the message viewport. Reading older messages must never snap to the end.
+  useEffect(() => {
+    const viewport = content.current;
+    if (!viewport) return;
+    const composer = composerRef.current;
+    const observer = new ResizeObserver(() => {
+      messageViewportSize.current = { width: viewport.clientWidth, height: viewport.clientHeight };
+      viewport.style.setProperty("--composer-height", `${composer?.getBoundingClientRect().height ?? 0}px`);
+      if (follow.current) viewport.scrollTop = viewport.scrollHeight;
+    });
+    observer.observe(viewport);
+    if (composer) observer.observe(composer);
+    return () => observer.disconnect();
+  }, [page, selected]);
   const resourcePaths: Record<string, string> = {
     tasks: "/v1/tasks",
     automations: "/v1/automations",
@@ -802,8 +806,9 @@ function App() {
   };
   const loadResource = useCallback(async () => {
     const generation = ++resourceRequest.current;
-    if (!client) return;
+    if (!client || !resourcePaths[resource]) return;
     setResourceError("");
+    setRecordsResource(resource);
     setRecords(null);
     try {
       const data = await client.request(
@@ -824,6 +829,7 @@ function App() {
   if (!client)
     return (
       <Connection
+        autoRestore={autoRestore}
         connect={async (c) => {
           const abort = new AbortController(),
             timer = setTimeout(() => abort.abort(), 12000);
@@ -836,6 +842,9 @@ function App() {
             );
             setThreads(rows);
             setClient(c);
+            const previous = localStorage.getItem(`last-thread:${c.base}`);
+            const restored = rows.find((t) => t.id === previous && !t.archived);
+            if (restored) { setSelected(restored.id); selectedRef.current = restored.id; }
           } finally {
             clearTimeout(timer);
           }
@@ -845,15 +854,23 @@ function App() {
   const latest = detail?.turns.at(-1),
     running = active(latest?.status),
     current = detail?.thread;
+  const approvalKey = `approval-mode:${client.base}:${selected}`;
+  const savedApproval = localStorage.getItem(approvalKey);
+  const autoApprove = approvalOverrides[approvalKey] ?? (savedApproval === null ? current?.auto_approve === true : savedApproval === "auto");
+  const chooseApproval = (enabled: boolean) => {
+    localStorage.setItem(approvalKey, enabled ? "auto" : "ask");
+    setApprovalOverrides((old) => ({ ...old, [approvalKey]: enabled }));
+    setSheet(null);
+  };
   const choose = (t: Thread) => {
     switchThread(t.id);
     setPage("chat");
     setDrawer(false);
   };
-  const create = async () => {
+  const create = async (configured = false) => {
     const t = await client.request<Thread>("/v1/threads", "POST", {
-      ...(workspace.trim() ? { workspace: workspace.trim() } : {}),
-      ...(title.trim() ? { title: title.trim() } : {}),
+      ...((configured ? workspace.trim() : current?.workspace) ? { workspace: configured ? workspace.trim() : current!.workspace } : {}),
+      ...(configured && title.trim() ? { title: title.trim() } : {}),
       mode: mode === "goal" ? "agent" : mode,
       ...(provider.trim() ? { provider: provider.trim() } : {}),
       ...(model.trim() ? { model: model.trim() } : {}),
@@ -879,7 +896,7 @@ function App() {
       `/v1/threads/${selected}/${mode === "goal" ? "goal" : "turns"}`,
       "POST",
       {
-        ...(mode === "goal" ? { args: `-- ${text}` } : { prompt: text, mode }),
+        ...(mode === "goal" ? { args: `-- ${text}` } : { prompt: text, mode, auto_approve: autoApprove }),
         ...(provider ? { provider } : {}),
         ...(model ? { model } : {}),
         ...(effort ? { reasoning_effort: effort } : {}),
@@ -897,10 +914,11 @@ function App() {
   const selectPage = (p: Page) => {
     setDrawer(false);
     setSheet(null);
+    if (p === page) return;
     setPage(p);
     if (p === "workspace") setResource("workspace");
     if (p === "activity") setResource("tasks");
-    if (p === "settings") setResource("skills");
+    if (p === "settings") setResource("settings");
   };
   const visibleThreads = threads
     .filter((t) => t.archived === showArchived)
@@ -924,7 +942,7 @@ function App() {
     }
   };
   return (
-    <div className={`app-shell ${drawer ? "navigation-open" : ""}`}>
+    <div className={`app-shell ${drawer ? "navigation-open" : ""} ${keyboardVisible ? "keyboard-visible" : ""}`}>
       <div
         className="chat-surface"
         inert={drawer || !!sheet || !!resumeReview || undefined}
@@ -942,16 +960,16 @@ function App() {
           <div className="header-title">
             <strong>
               {page === "chat"
-                ? "智能体聊天"
+                ? "对话"
                 : page === "activity"
-                  ? "活动"
+                  ? "任务"
                   : page === "workspace"
-                    ? "工作区"
-                    : "设置与扩展"}
+                    ? "项目"
+                    : ({ notifications: "通知", devices: "已配对设备", connection: "连接信息", skills: "技能", plugins: "插件", mcp: "工具连接" } as Record<string, string>)[resource] || "设置"}
             </strong>
             <span
               className="connection-indicator"
-              aria-label={selected ? streamState : "已连接电脑"}
+              aria-label={selected ? `电脑连接：${streamState}` : "已连接电脑"}
               title={selected ? streamState : "已连接电脑"}
             >
               <i
@@ -961,17 +979,22 @@ function App() {
               />
             </span>
           </div>
-          <IconButton
+          {page === "chat" && selected && <IconButton
             title="结果"
             onClick={() => {
               setDrawer(false);
+              setResultTurnId(undefined);
               setSheet("result");
             }}
           >
-            <Code2 size={21} />
-          </IconButton>
+            <FileText size={21} />
+          </IconButton>}
         </header>
-        <PreviewStatus client={client} />
+
+        {selected && streamState !== "已连接" && streamState !== "连接中" && <section className="connection-banner" aria-label="连接提示" role="status">
+          <span>{streamState === "需要重新连接" ? "电脑授权已失效，请重新配对。" : "正在恢复电脑连接。消息和已有结果会保留，不会自动重发操作。"}</span>
+          <button onClick={() => { if (streamState === "需要重新连接") { setAutoRestore(false); setClient(null); } else setResume(n => n + 1); }}>{streamState === "需要重新连接" ? "重新配对" : "重新连接"}</button>
+        </section>}
         {page === "chat" ? (
           <>
             <div className="breadcrumb">
@@ -989,22 +1012,20 @@ function App() {
               <ChevronRight size={13} />
               <span>{current?.title ?? "新的一天，开始创造"}</span>
               {selected && (
-                <IconButton title="分享聊天" onClick={() => setSheet("more")}>
-                  <Share2 size={15} />
-                </IconButton>
-              )}
-              {selected && (
                 <IconButton title="会话操作" onClick={() => setSheet("more")}>
                   <MoreHorizontal size={19} />
                 </IconButton>
               )}
             </div>
+            <div className="chat-body">
             <div
               className="messages"
               ref={content}
               onScroll={() => {
                 const el = content.current;
-                if (el)
+                // A viewport resize can emit scroll before ResizeObserver runs.
+                // It must not be mistaken for the reader scrolling into history.
+                if (el && el.clientWidth === messageViewportSize.current.width && el.clientHeight === messageViewportSize.current.height)
                   follow.current =
                     el.scrollHeight - el.scrollTop - el.clientHeight < 80;
               }}
@@ -1014,22 +1035,18 @@ function App() {
                   <div className="brandmark small">
                     <Code2 size={27} />
                   </div>
-                  <span className="eyebrow">YOUR PERSONAL WORKBENCH</span>
                   <h1>想做点什么？</h1>
-                  <p>
-                    从一个问题到一个完成的项目。
-                    <br />
-                    让电脑上的智能体继续为你工作。
-                  </p>
+
                   <button
                     className="suggestion"
                     aria-label="新建会话"
-                    onClick={() => setSheet("new")}
+                    disabled={busy}
+                    onClick={() => void run(() => create())}
                   >
                     <Code2 size={20} />
                     <span>
                       <b>开始一个任务</b>
-                      <small>选择项目，与智能体一起工作</small>
+
                     </span>
                     <ChevronRight size={17} />
                   </button>
@@ -1040,7 +1057,7 @@ function App() {
                     <MessageSquare size={20} />
                     <span>
                       <b>继续之前的对话</b>
-                      <small>{threads.length} 个会话等待你回来</small>
+                      <small>{threads.length} 个会话</small>
                     </span>
                     <ChevronRight size={17} />
                   </button>
@@ -1056,22 +1073,24 @@ function App() {
                     <div className="empty">
                       <MessageSquare size={28} />
                       <h2>{current?.title ?? "新会话"}</h2>
-                      <p>输入任务，开始这次对话。</p>
+
                     </div>
                   )}
-                  {detail.items.map((item) => (
-                    <ItemView
-                      key={item.id}
-                      item={item}
-                      reuse={(text) => {
-                        setPrompt(text);
-                        setAttachments([]);
-                        content.current?.scrollTo({
-                          top: content.current.scrollHeight,
-                        });
-                      }}
-                    />
-                  ))}
+                  <ConversationView
+                    threadId={selected || undefined}
+                    openBrowser={() => setSheet("browser")}
+                    items={detail.items}
+                    turns={detail.turns}
+                    editDisabled={running || busy || !!current?.archived || mode === "goal"}
+                    edit={(item) => { setEditTarget(item); setSheet("edit"); }}
+                    openChanges={(turnId) => { setResultTurnId(turnId); setSheet("result"); }}
+                    waiting={questions.length ? "等待你的回答" : approvals.length || elevations.length ? "等待你的确认" : undefined}
+                    reuse={(text) => {
+                      setPrompt(text);
+                      setAttachments([]);
+                      content.current?.scrollTo({ top: content.current.scrollHeight });
+                    }}
+                  />
                   {current?.goal && (
                     <div className="action-card">
                       <div className="card-label">
@@ -1216,21 +1235,12 @@ function App() {
                       }}
                     />
                   ))}
-                  {running && (
-                    <div className="working">
-                      <span className="loader" />
-                      智能体正在工作{" "}
-                      <button onClick={() => setSheet("result")}>
-                        查看进展
-                        <ChevronRight size={13} />
-                      </button>
-                    </div>
-                  )}
+
                 </>
               )}
             </div>
             {selected && (
-              <section className="composer">
+              <section className="composer" ref={composerRef}>
                 {current?.archived && (
                   <p className="feature-note">
                     此会话已归档。在“会话操作”中恢复后即可继续发送。
@@ -1246,8 +1256,8 @@ function App() {
                   <textarea
                     ref={inputRef}
                     aria-label="消息"
-                    disabled={busy || uploadBusy || !!sheet || !current}
-                    placeholder={running ? "追加指令…" : "问我"}
+                    disabled={uploadBusy || !!sheet || !current || !!current?.archived}
+                    placeholder={running ? "补充要求…" : "发消息，或描述你想完成的事…"}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     onKeyDown={(e) => {
@@ -1438,61 +1448,29 @@ function App() {
                   </div>
                 </div>
                 <div className="composer-footer">
-                  <button
-                    aria-label="查看分支"
-                    onClick={() => {
-                      selectPage("workspace");
-                      setWorkspaceView("git");
-                    }}
-                  >
-                    <GitBranch size={14} /> Git
-                  </button>
-                  <button
-                    className="workspace-chip"
-                    aria-label="选择项目文件"
-                    onClick={() => {
-                      selectPage("workspace");
-                      setWorkspaceView("files");
-                    }}
-                  >
-                    <Folder size={14} />
-                    <span>
-                      {current?.workspace.split("/").filter(Boolean).at(-1) ??
-                        "项目"}
-                    </span>
-                    <ChevronRight size={10} />
-                  </button>
-                  <select
-                    aria-label="运行模式"
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value)}
-                  >
-                    {["agent", "plan", "ask", "goal"].map((m) => (
-                      <option key={m} value={m}>
-                        {m === "agent" ? "智能体" : label[m]}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    aria-label="查看上下文"
-                    onClick={() => setSheet("more")}
-                  >
-                    <Activity size={13} />
+                  <button className="task-settings-chip" aria-label="任务设置" onClick={() => setSheet("task-settings")}>{mode === "agent" ? "智能体" : label[mode]}<ChevronRight size={14} /></button>
+                  <button className="permission-chip" onClick={() => setSheet("permissions")} aria-label="审批模式">
+                    <ShieldCheck size={14} />{mode === "goal" ? "目标权限" : autoApprove ? "自动批准" : "逐次确认"}
                   </button>
                 </div>
               </section>
             )}
+            </div>
           </>
         ) : (
           <main className="resource-page">
-            {page === "settings" && (
+            {page === "settings" && resource !== "settings" && (
+              <button className="back-row" onClick={() => setResource("settings")}>‹ 返回设置</button>
+            )}
+            {page === "settings" && resource === "connection" && <section className="record-card"><h2>当前电脑</h2><p className="connection-address">{client.base}</p></section>}
+            {page === "settings" && resource === "settings" && (
               <div className="device-card">
                 <div className="avatar">
                   <Monitor size={22} />
                 </div>
                 <div>
-                  <strong>已连接工作台</strong>
-                  <small>{client.base}</small>
+                  <strong>{selected && streamState !== "已连接" ? "电脑连接待恢复" : "已连接工作台"}</strong>
+
                 </div>
                 <IconButton
                   title="断开连接"
@@ -1500,6 +1478,7 @@ function App() {
                     switchThread(null, false);
                     drafts.current = {};
                     uploadedDrafts.current = {};
+                    setAutoRestore(false);
                     setClient(null);
                     setThreads([]);
                     setPage("chat");
@@ -1509,9 +1488,10 @@ function App() {
                 </IconButton>
               </div>
             )}
-            {page === "settings" && <DeviceTools client={client} />}
-            {page === "settings" && <NativeNotificationSettings />}
-            {page === "settings" && (
+            {page === "settings" && resource === "connection" && <><PreviewStatus client={client} /><ServiceStatus client={client} /></>}
+            {page === "settings" && resource === "devices" && <DeviceTools client={client} />}
+            {page === "settings" && resource === "notifications" && <NativeNotificationSettings />}
+            {page === "settings" && resource === "settings" && (
               <label className="appearance-setting">
                 外观
                 <select
@@ -1525,13 +1505,24 @@ function App() {
                 </select>
               </label>
             )}
+            {page === "settings" && resource === "settings" && (
+              <div className="settings-groups">
+                <h2>偏好与连接</h2>
+                {[["notifications", "通知", "任务完成与待确认提醒"], ["devices", "已配对设备", "管理电脑与手机授权"], ["connection", "连接信息", "当前电脑与服务状态"]].map(([id, title]) => (
+                  <button className="settings-row" aria-label={title} key={id} onClick={() => setResource(id)}><span><strong>{title}</strong></span><ChevronRight size={18} /></button>
+                ))}
+                <h2>扩展能力</h2>
+                {[["skills", "技能", "让助手掌握更多工作方法"], ["plugins", "插件", "管理电脑上的扩展"], ["mcp", "工具连接", "连接外部服务（MCP）"]].map(([id, title]) => (
+                  <button className="settings-row" aria-label={title} key={id} onClick={() => setResource(id)}><span><strong>{title}</strong></span><ChevronRight size={18} /></button>
+                ))}
+              </div>
+            )}
             {page === "activity" && capabilities.tasks === false && (
               <p className="feature-note">
-                当前电脑服务未启用后台任务。请在电脑的 Runtime
-                配置中启用后重新连接；普通会话仍可使用。
+                电脑未启用后台任务。
               </p>
             )}
-            {page !== "workspace" && (
+            {page === "activity" && (
               <div className="resource-tabs">
                 {(page === "activity"
                   ? [
@@ -1549,6 +1540,7 @@ function App() {
                 ).map(([key, name]) => (
                   <button
                     key={key}
+                    aria-pressed={resource === key}
                     className={resource === key ? "selected" : ""}
                     onClick={() => setResource(key)}
                   >
@@ -1566,23 +1558,26 @@ function App() {
                   <div className="resource-tabs" aria-label="工作区功能">
                     {[
                       ["files", "文件"],
-                      ["changes", "执行变更"],
-                      ["git", "Git"],
-                      ["terminal", "终端"],
-                      ["browser", "浏览器控制"],
-                      ["cua", "电脑控制"],
-                      ["memory", "项目记忆"],
+                      ["changes", "变更"],
+                      ["tools", "工具"],
                     ].map(([id, name]) => (
                       <button
                         key={id}
                         onClick={() => setWorkspaceView(id)}
-                        className={workspaceView === id ? "selected" : ""}
+                        aria-pressed={workspaceView === id || (id === "tools" && !["files", "changes"].includes(workspaceView))}
+                        className={(workspaceView === id || (id === "tools" && !["files", "changes"].includes(workspaceView))) ? "selected" : ""}
                       >
                         {name}
                       </button>
                     ))}
                   </div>
-                  {workspaceView === "files" ? (
+                  {!["files", "changes", "tools"].includes(workspaceView) && <button className="back-row" onClick={() => setWorkspaceView("tools")}>‹ 返回项目工具</button>}
+                  {workspaceView === "tools" ? (
+                    <div className="tool-directory">
+                      <h2>项目工具</h2>
+                      {[["git", "Git", "查看变更与管理分支"], ["terminal", "终端", "运行电脑命令"], ["browser", "浏览器控制", "查看与操作网页"], ["cua", "电脑控制", "查看画面、暂停或交还电脑任务"], ["memory", "项目记忆", "保存项目的工作约定"]].map(([id, title]) => <button className="settings-row" aria-label={title} key={id} onClick={() => setWorkspaceView(id)}><span><strong>{title}</strong></span><ChevronRight size={18} /></button>)}
+                    </div>
+                  ) : workspaceView === "files" ? (
                     <FileTools
                       key={selected}
                       client={client}
@@ -1638,11 +1633,11 @@ function App() {
                 <div className="empty">
                   <Folder size={28} />
                   <h2>先选择一个会话</h2>
-                  <p>在会话列表选择项目后，可查看真实文件变更和电脑浏览器。</p>
+
                   <button onClick={() => setDrawer(true)}>选择会话</button>
                 </div>
               )
-            ) : resourceError ? (
+            ) : page === "settings" && ["settings", "devices", "notifications", "connection"].includes(resource) ? null : recordsResource !== resource ? (<div className="empty" role="status">正在加载…</div>) : resourceError ? (
               <div role="alert" className="error">
                 {resourceError}
                 <button onClick={() => void loadResource()}>重试</button>
@@ -1707,10 +1702,15 @@ function App() {
                 )}
               </>
             ) : (
-              <Records data={records} resource={resource} action={() => {}} />
+              resource === "usage" ? <UsageView data={records} /> : <div className="empty"><h2>暂时无法展示此内容</h2><p>请返回上一级选择功能。</p></div>
             )}
           </main>
         )}
+        <nav className="app-tabbar" aria-label="主导航" hidden={keyboardVisible}>
+          {([["chat", "对话", MessageSquare], ["activity", "任务", Activity], ["workspace", "项目", Folder], ["settings", "设置", Settings]] as const).map(([id, name, Icon]) => (
+            <button key={id} aria-current={page === id ? "page" : undefined} onClick={() => selectPage(id)}><Icon size={22} strokeWidth={page === id ? 2 : 1.7} /><span>{name}</span></button>
+          ))}
+        </nav>
       </div>
       {drawer && (
         <button
@@ -1719,20 +1719,19 @@ function App() {
           onClick={() => setDrawer(false)}
         />
       )}
-      {drawer && (
-        <div className="drawer-backdrop" onClick={() => setDrawer(false)}>
+      <div className="drawer-backdrop" aria-hidden={!drawer} inert={!drawer || undefined} onClick={() => setDrawer(false)}>
           <aside
             ref={drawerRef}
             tabIndex={-1}
             role="dialog"
-            aria-modal="true"
+            aria-modal={drawer || undefined}
             aria-label="会话导航"
             className="drawer"
             onClick={(e) => e.stopPropagation()}
           >
             <header>
               <div className="brandmark tiny">
-                <Code2 size={20} />
+                <img src="/brand.svg" alt="" width={32} height={32} />
               </div>
               <button
                 className="sidebar-brand"
@@ -1753,13 +1752,17 @@ function App() {
             </header>
             <button
               className="new-thread"
+              disabled={busy}
               onClick={() => {
                 setDrawer(false);
-                setSheet("new");
+                void run(() => create());
               }}
             >
               <Plus size={19} />
               新建会话
+            </button>
+            <button className="new-project-chat" onClick={() => { setDrawer(false); setSheet("new"); }}>
+              指定项目新建…
             </button>
             {(searchOpen || search) && (
               <label className="search">
@@ -1771,23 +1774,7 @@ function App() {
                 />
               </label>
             )}
-            <nav className="sidebar-navigation" aria-label="应用导航">
-              {(
-                [
-                  ["activity", "活动", Activity],
-                  ["workspace", "工作区", Folder],
-                ] as const
-              ).map(([id, name, Icon]) => (
-                <button
-                  key={id}
-                  className={page === id ? "active" : ""}
-                  onClick={() => selectPage(id)}
-                >
-                  <Icon size={21} strokeWidth={page === id ? 2.2 : 1.7} />
-                  <span>{name}</span>
-                </button>
-              ))}
-            </nav>
+
 
             <div className="resource-tabs" aria-label="会话筛选">
               <button
@@ -1884,14 +1871,13 @@ function App() {
             </footer>
           </aside>
         </div>
-      )}
       {sheet === "new" && (
         <Sheet title="新建会话" close={() => setSheet(null)}>
           <form
             className="sheet-form"
             onSubmit={(e) => {
               e.preventDefault();
-              void run(create);
+              void run(() => create(true));
             }}
           >
             <label>
@@ -1994,9 +1980,6 @@ function App() {
       {sheet === "model" && (
         <Sheet title="模型与推理" close={cancelModel}>
           <div className="sheet-form">
-            <p className="muted">
-              使用电脑中已配置的提供商与模型，密钥留在电脑。
-            </p>
             <ModelCatalog
               client={client}
               provider={provider}
@@ -2083,6 +2066,53 @@ function App() {
           </div>
         </Sheet>
       )}
+      {sheet === "edit" && selected && editTarget && <Sheet title="编辑并重新发送" close={() => { if (!editBusy) setSheet(null); }}>
+        <EditMessage key={`${selected}:${editTarget.id}`} client={client} threadId={selected} item={editTarget}
+          options={{ mode, provider, model, ...(effort ? { reasoning_effort: effort } : {}), auto_approve: autoApprove }}
+          isCurrent={() => selectedRef.current === selected && connectionRef.current === client}
+          onBusy={setEditBusy}
+          onChanged={async () => {
+            const next = await client.request<Detail>(`/v1/threads/${selected}`);
+            if (selectedRef.current !== selected || connectionRef.current !== client) return;
+            setDetail(next); detailRef.current = next; setResume(n => n + 1);
+            await refreshThreads();
+          }}
+          onSent={() => { if (selectedRef.current === selected) { setSheet(null); setResume(n => n + 1); } }}
+          onKeepDraft={(text) => { if (selectedRef.current === selected) { setPrompt(text); setAttachments([]); setUploaded([]); setSheet(null); } }}
+        />
+      </Sheet>}
+      {sheet === "browser" && selected && <Sheet title="浏览器" close={() => setSheet(null)}>
+        <BrowserControls key={selected} client={client} threadId={selected} />
+      </Sheet>}
+      {sheet === "task-settings" && selected && <Sheet title="任务设置" close={() => setSheet(null)}>
+        <div className="sheet-form"><label>运行模式
+                  <select
+                    aria-label="运行模式"
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value)}
+                  >
+                    {["agent", "plan", "ask", "goal"].map((m) => (
+                      <option key={m} value={m}>
+                        {m === "agent" ? "智能体" : label[m]}
+                      </option>
+                    ))}
+                  </select>
+        </label>
+          <p className="muted">下条消息生效。</p>
+          <p className="muted">{({ agent: "调用工具并完成工作", plan: "先规划，再执行", ask: "提问与讨论", goal: "按电脑端设置持续推进目标" } as Record<string, string>)[mode]}</p>
+          <button onClick={() => setSheet("permissions")}>查看审批方式：{mode === "goal" ? "目标权限" : autoApprove ? "自动批准" : "逐次确认"}</button>
+          <button className="primary" onClick={() => setSheet(null)}>完成</button>
+        </div>
+      </Sheet>}
+      {sheet === "permissions" && selected && <Sheet title="审批模式" close={() => setSheet(null)}>
+        <div className="sheet-form permission-options">
+          <p className="muted">下条消息生效；待确认操作不变。</p>
+          {mode === "goal" ? <p>目标权限由电脑管理。</p> : <>
+            <button className="settings-row" aria-pressed={!autoApprove} onClick={() => chooseApproval(false)}><span><strong>逐次确认</strong><small>需要授权的工具操作，由你确认后执行。</small></span>{!autoApprove && <Check size={18} />}</button>
+            <button className="settings-row" aria-pressed={autoApprove} onClick={() => chooseApproval(true)}><span><strong>自动批准</strong><small>允许助手自动批准常规工具请求，包括文件修改和命令执行。强制确认及系统权限仍会询问。</small></span>{autoApprove && <Check size={18} />}</button>
+          </>}
+        </div>
+      </Sheet>}
       {sheet === "more" && selected && detail && (
         <Sheet title="会话操作" close={() => setSheet(null)}>
           <SessionTools
@@ -2143,10 +2173,11 @@ function App() {
               key={selected}
               client={client}
               threadId={selected}
+              turnId={resultTurnId}
               compact
             />
           )}
-          <h3>工具记录</h3>
+          <details className="tool-log"><summary>工具记录</summary>
           <div className="result-list">
             {detail?.items
               .filter(
@@ -2158,7 +2189,7 @@ function App() {
                   ].includes(i.kind),
               )
               .map((i) => (
-                <ItemView item={i} key={i.id} />
+                <ProcessItem item={i} key={i.id} />
               ))}
             {!detail?.items.some(
               (i) =>
@@ -2168,10 +2199,11 @@ function App() {
             ) && (
               <div className="empty">
                 <Terminal size={28} />
-                <p>工具调用和文件变更会显示在这里。</p>
+                <p>暂无执行记录</p>
               </div>
             )}
           </div>
+          </details>
         </Sheet>
       )}
       {resumeReview && (
@@ -2226,99 +2258,6 @@ function App() {
           <X size={14} />
         </div>
       )}
-    </div>
-  );
-}
-function Records({
-  data,
-  resource,
-  action,
-}: {
-  data: unknown;
-  resource: string;
-  action: (id: string, a: string) => void;
-}) {
-  const value = data as Record<string, unknown> | null;
-  const candidates = Array.isArray(data)
-    ? data
-    : (value?.[resource] ?? value?.items ?? value?.servers);
-  if (Array.isArray(candidates))
-    return (
-      <div className="record-list">
-        {candidates.length === 0 ? (
-          <div className="empty">
-            <Check size={27} />
-            <h2>暂时没有内容</h2>
-            <p>
-              电脑上的{resource === "tasks" ? "任务" : "配置"}会同步显示在这里。
-            </p>
-          </div>
-        ) : (
-          candidates.map((r: Record<string, unknown>, i) => (
-            <article className="record-card" key={String(r.id ?? r.name ?? i)}>
-              <div className="card-label">
-                {resource === "automations" ? (
-                  <Zap size={16} />
-                ) : resource === "tasks" ? (
-                  <Activity size={16} />
-                ) : (
-                  <Plug size={16} />
-                )}
-                <span>
-                  {String(r.title ?? r.name ?? r.prompt ?? r.id ?? "项目")}
-                </span>
-              </div>
-              <span className="status-pill">
-                {label[String(r.status)] ??
-                  String(r.status ?? (r.enabled === false ? "已停用" : "可用"))}
-              </span>
-              <details>
-                <summary>详细信息</summary>
-                <pre>{pretty(r)}</pre>
-              </details>
-              {resource === "tasks" && !!r.id && (
-                <div className="actions">
-                  {active(String(r.status)) ? (
-                    <button onClick={() => action(String(r.id), "cancel")}>
-                      停止任务
-                    </button>
-                  ) : [
-                      "failed",
-                      "interrupted",
-                      "canceled",
-                      "timed_out",
-                    ].includes(String(r.status)) ? (
-                    <button onClick={() => action(String(r.id), "resume")}>
-                      恢复任务
-                    </button>
-                  ) : null}
-                </div>
-              )}
-              {resource === "automations" && !!r.id && (
-                <div className="actions">
-                  <button
-                    onClick={() =>
-                      action(
-                        String(r.id),
-                        r.status === "paused" ? "resume" : "pause",
-                      )
-                    }
-                  >
-                    {r.status === "paused" ? "启用" : "暂停"}
-                  </button>
-                  <button onClick={() => action(String(r.id), "run")}>
-                    立即运行
-                  </button>
-                </div>
-              )}
-            </article>
-          ))
-        )}
-      </div>
-    );
-  return (
-    <div className="record-card">
-      <pre>{pretty(data)}</pre>
     </div>
   );
 }
