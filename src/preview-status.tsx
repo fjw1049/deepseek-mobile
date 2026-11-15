@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { RuntimeClient, ApiError } from "./protocol";
 type Status = {
   model: string;
-  remaining_requests: number;
-  max_requests: number;
+  remaining_requests: number | null;
+  max_requests: number | null;
+  mode?: "personal" | "smoke-test";
+  max_output_tokens?: number;
+  max_request_bytes?: number;
   manual_enabled: boolean;
 };
 export function PreviewStatus({ client }: { client: RuntimeClient }) {
@@ -42,11 +45,19 @@ export function PreviewStatus({ client }: { client: RuntimeClient }) {
     };
   }, [client]);
   if (!status) return null;
+  if (status.mode === "personal") return (
+    <section className="record-card" aria-label="模型服务">
+      <h3>{status.model}</h3>
+      <p>个人服务 · 固定模型 · 思考关闭</p>
+      <p className="muted">按用量计费 · 输出上限：{status.max_output_tokens ?? 1024} tokens。</p>
+      {status.max_request_bytes != null && <p className="muted">请求上限：{(status.max_request_bytes / 1024 / 1024).toFixed(1)} MiB</p>}
+    </section>
+  );
   return (
-    <details className="preview-status" aria-label="真实模型验证额度">
+    <details className="preview-status" aria-label="开发预览调用限制">
       <summary>
         <span className="budget-dot" /> {status.model}{" "}
-        <span>· 剩余 {status.remaining_requests} 次验证</span>
+        <span>· 开发预览剩余 {status.remaining_requests} 次</span>
       </summary>
       <div className="preview-status-body">
         <strong>
@@ -55,7 +66,7 @@ export function PreviewStatus({ client }: { client: RuntimeClient }) {
         </strong>
         <p>
           还可调用 {status.remaining_requests} 次，每次最多 1024 输出
-          token。工具续答也消耗次数；此预览仅用于有限验证。
+          token。工具续答也消耗次数；这是开发预览的调用上限，不是账户余额。日常使用请连接电脑上的正式工作台。
         </p>
         {!status.manual_enabled && status.remaining_requests === 0 && (
           <button

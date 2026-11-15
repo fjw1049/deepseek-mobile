@@ -3,11 +3,14 @@ The API key is read with getpass, held in memory and never serialized.
 """
 import argparse, asyncio, getpass, json, os, sys, time, socket, ipaddress
 from pathlib import Path
+from live_policy import validate_payload, PERSONAL_MAX_BYTES, SMOKE_MAX_BYTES
 parser=argparse.ArgumentParser()
 parser.add_argument('--runtime-source',type=Path,required=True)
 parser.add_argument('--data-dir',type=Path,required=True)
 parser.add_argument('--port',type=int,default=17879)
 parser.add_argument('--lan-host',type=ipaddress.IPv4Address)
+parser.add_argument('--personal',action='store_true',help='User-operated app service without the smoke-test cumulative quota')
+parser.add_argument('--key-config',type=Path,help='Read an existing official DeepSeek key from a local TOML config')
 args=parser.parse_args()
 if args.lan_host and (not args.lan_host.is_private or args.lan_host.is_unspecified or args.lan_host.is_loopback):
  parser.error('--lan-host must be this Mac private LAN IPv4 address')
@@ -25,7 +28,14 @@ from deepseek_tui.protocol.responses import StreamDone,StreamToolCallComplete
 from deepseek_tui.server.runtime import AppRuntime
 from deepseek_tui.server.app import build_fastapi_app
 
-key=getpass.getpass('Official DeepSeek API key (hidden): ').strip()
+if args.key_config:
+ import tomllib
+ configured=tomllib.loads(args.key_config.read_text())
+ provider=configured.get('providers',{}).get('deepseek',{})
+ if provider.get('base_url','https://api.deepseek.com').rstrip('/') not in ('https://api.deepseek.com','https://api.deepseek.com/v1'):raise SystemExit('Only the official DeepSeek provider is allowed')
+ key=provider.get('api_key','').strip()
+else:
+ key=getpass.getpass('Official DeepSeek API key (hidden): ').strip()
 if not key: raise SystemExit('No API key supplied')
 state={'provider':'https://api.deepseek.com','model':'deepseek-flash','max_requests':6,'manual_enabled':False,'max_output_tokens_per_request':1024,'requests':[],'usage':[],'tool_calls':[],'models_verified':False}
 report=args.data_dir/'provider-report.json'
@@ -35,15 +45,16 @@ if report.is_file():
  for field in ('requests','usage','tool_calls','manual_enabled'):
   if field in prior:state[field]=prior[field]
  state['max_requests']=12 if state['manual_enabled'] else 6
+state['mode']='personal' if args.personal else 'smoke-test'
 def save(): report.write_text(json.dumps(state,ensure_ascii=False,indent=2))
 class BudgetTransport(httpx.AsyncBaseTransport):
  def __init__(self):self.inner=httpx.AsyncHTTPTransport(retries=0)
  async def handle_async_request(self,request):
   if request.url.host!='api.deepseek.com' or request.url.scheme!='https':raise RuntimeError('Live test allows only the official DeepSeek endpoint')
   if request.method=='POST':
-   if len(state['requests'])>=state['max_requests']:raise RuntimeError('本阶段真实验证额度已用完；可在 App 中显式开启手动验证额度。')
+   if not args.personal and len(state['requests'])>=state['max_requests']:raise RuntimeError('本阶段真实验证额度已用完；可在 App 中显式开启手动验证额度。')
    payload=json.loads(request.content)
-   if payload.get('model')!='deepseek-flash' or payload.get('max_tokens',10**9)>1024 or len(request.content)>250000:raise RuntimeError('Live request exceeds the fixed model/output/input boundary')
+   validate_payload(payload, len(request.content), personal=args.personal)
    row={'index':len(state['requests'])+1,'model':payload['model'],'max_tokens':payload['max_tokens'],'request_bytes':len(request.content),'started_at':time.time()}
    state['requests'].append(row);save()
    try:
@@ -95,13 +106,13 @@ async def main():
  app.state.thread_manager._get_llm_client=fixed_client
  @app.get('/v1/preview-status')
  async def preview_status():
-  return {'model':'deepseek-flash','remaining_requests':state['max_requests']-len(state['requests']),'max_requests':state['max_requests'],'max_output_tokens':1024,'manual_enabled':state['manual_enabled']}
+  return {'model':'deepseek-flash','mode':state['mode'],'remaining_requests':None if args.personal else max(0,state['max_requests']-len(state['requests'])),'max_requests':None if args.personal else state['max_requests'],'max_output_tokens':1024,'max_request_bytes':PERSONAL_MAX_BYTES if args.personal else SMOKE_MAX_BYTES,'manual_enabled':state['manual_enabled']}
  @app.post('/v1/preview-status/manual')
  async def enable_manual():
   if not state['manual_enabled']:
    state.update(manual_enabled=True,max_requests=12);save()
   return await preview_status()
- print(f'LIVE_PREVIEW_READY http://127.0.0.1:{args.port} model=deepseek-flash limit=12x1024',flush=True)
+ print(f'LIVE_PREVIEW_READY http://127.0.0.1:{args.port} model=deepseek-flash mode={state["mode"]}',flush=True)
  sockets=[]
  try:
   for host in ['127.0.0.1'] + ([str(args.lan_host)] if args.lan_host else []):
