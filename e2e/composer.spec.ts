@@ -6,6 +6,7 @@ test("text attachments, reusable messages, per-code copy, model effort and theme
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "新建会话");
@@ -32,7 +33,8 @@ test("text attachments, reusable messages, per-code copy, model effort and theme
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain('print("Mobile connected")');
-  await page.getByRole("button", { name: "编辑为新消息" }).click();
+  await page.getByLabel("消息操作", { exact: true }).click();
+  await page.getByRole("button", { name: "复制到输入框" }).click();
   await expect(page.getByLabel("消息", { exact: true })).toHaveValue(
     /requirements.md/,
   );
@@ -57,6 +59,7 @@ test("draft and attachments stay with the session when switching", async ({
   page,
 }) => {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   for (const name of ["草稿A", "草稿B"]) {
@@ -89,6 +92,7 @@ test("late send response never clears another session draft", async ({
   page,
 }) => {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   for (const name of ["延迟响应A", "延迟响应B"]) {

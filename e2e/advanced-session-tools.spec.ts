@@ -39,6 +39,7 @@ async function setup(page: Page, request: APIRequestContext) {
     route.fulfill({ json: detail }),
   );
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await page.getByRole("button", { name: "打开会话", exact: true }).click();

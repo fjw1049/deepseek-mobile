@@ -29,6 +29,7 @@ async function createThread(
 }
 async function connect(page: Page) {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台", exact: true }).click();
   await expect(
@@ -137,6 +138,7 @@ test("real device pairing in another browser context is revocable and never writ
 }) => {
   await connect(page);
   await navigate(page, "设置");
+  await page.getByRole("button", { name: "已配对设备", exact: true }).click();
   const codeResponse = page.waitForResponse(
     (r) =>
       r.url().endsWith("/v1/mobile/devices/pair-codes") &&
@@ -152,6 +154,7 @@ test("real device pairing in another browser context is revocable and never writ
     const phone = await context.newPage();
     await phone.goto("/");
     await phone.getByLabel("配对服务地址").fill("/runtime");
+    await phone.getByText("设备名称（可选）", { exact: true }).click();
     await phone
       .getByLabel("设备名称", { exact: true })
       .fill("离线配对验收手机");
@@ -169,6 +172,7 @@ test("real device pairing in another browser context is revocable and never writ
       phone.getByRole("button", { name: "打开会话", exact: true }),
     ).toBeVisible();
     await navigate(phone, "设置");
+    await phone.getByRole("button", { name: "已配对设备", exact: true }).click();
     await expect(
       phone.getByRole("heading", { name: "离线配对验收手机", exact: true }),
     ).toBeVisible();

@@ -1,0 +1,37 @@
+import { test, expect } from '@playwright/test';
+
+test('left navigation reveals without scaling or vertical drift and closes symmetrically', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('高级连接（地址与令牌）', { exact: true }).click();
+  await page.getByLabel('访问令牌', { exact: true }).fill('mobile-offline-test');
+  await page.getByRole('button', { name: '连接工作台', exact: true }).click();
+  await page.evaluate(() => document.documentElement.style.setProperty('--app-safe-top', '59px'));
+  const menu = page.getByRole('button', { name: '打开会话', exact: true });
+  await menu.click();
+  const drawer = page.getByRole('dialog', { name: '会话导航' });
+  const close = drawer.getByRole('button', { name: '关闭会话列表', exact: true });
+  expect((await close.boundingBox())!.y).toBeGreaterThanOrEqual(59);
+  await expect.poll(async () => (await page.locator('.chat-surface').boundingBox())!.x).toBe(272);
+  expect(await drawer.evaluate(el => getComputedStyle(el).transform)).toBe('none');
+  expect(await drawer.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+  await page.screenshot({ path: 'artifacts/apple-app/navigation-fixed.png', scale: 'css' });
+  await close.click();
+  await expect(drawer).toBeHidden();
+  await expect.poll(async () => (await page.locator('.chat-surface').boundingBox())!.x).toBe(0);
+  await menu.click();
+  await page.locator('.new-thread').click();
+  const results = page.getByRole('button', { name: '结果', exact: true });
+  await results.click();
+  const panel = page.getByRole('dialog', { name: '执行结果' });
+  const panelClose = panel.getByRole('button', { name: '关闭', exact: true });
+  await expect(panelClose).toBeVisible();
+  await panelClose.click();
+  await expect(panel).toHaveCount(0);
+  await results.click();
+  await page.evaluate(() => window.dispatchEvent(new Event('mobile-dismiss-overlay', { cancelable: true })));
+  await expect(panel).toHaveCount(0);
+  await expect(results).toBeEnabled();
+  await menu.click();
+  await page.getByRole('button', { name: '关闭导航', exact: true }).click();
+  await expect(drawer).toBeHidden();
+});

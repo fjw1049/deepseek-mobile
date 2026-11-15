@@ -8,6 +8,7 @@ test("ASR missing credentials is shown explicitly without offering paid transcri
     route.fulfill({ json: { configured: false } }),
   );
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "新建会话");
@@ -51,6 +52,7 @@ test("shared recorder captures WAV; only explicit transcription uploads and fill
     return route.fulfill({ json: { text: "离线语音草稿" } });
   });
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "新建会话");

@@ -12,14 +12,16 @@ test("workspace uses thread-specific differences and browser frames, with no con
   expect(created.ok()).toBeTruthy();
   const t = await created.json();
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await page.getByRole("button", { name: "打开会话" }).click();
   await page.getByRole("button", { name: /工作区功能验收/ }).click();
   await navigate(page, "工作区");
-  await page.getByRole("button", { name: "执行变更", exact: true }).click();
+  await page.getByRole("button", { name: "变更", exact: true }).click();
+  await page.getByText("工作区信息", { exact: true }).click();
   await expect(page.getByText("当前会话工作区")).toBeVisible();
-  await expect(page.getByText("此会话还没有记录文件变更。")).toBeVisible();
+  await expect(page.getByText("暂无文件变更")).toBeVisible();
   await page.getByRole("button", { name: "浏览器", exact: true }).click();
   await expect(
     page.getByText("此会话还没有可预览的电脑浏览器画面。"),
@@ -74,6 +76,15 @@ test("workspace uses thread-specific differences and browser frames, with no con
     page.getByRole("img", { name: "电脑浏览器当前画面" }),
   ).toBeVisible();
   await expect(page.getByText("验收页面", { exact: true })).toBeVisible();
+  await page.route(`**/v1/threads/${t.id}/browser/view`, r => r.fulfill({ json: {
+    active: false, owner: 'agent', url: 'https://stale.example.com',
+    image: 'data:image/png;base64,stale', tabs: [{ id: 'old', title: '过期网页', url: 'https://stale.example.com' }],
+  } }));
+  await page.getByRole('button', { name: '刷新工作区结果' }).click();
+  await expect(page.getByText('此会话还没有可预览的电脑浏览器画面。')).toBeVisible();
+  await expect(page.getByRole('img', { name: '电脑浏览器当前画面' })).toHaveCount(0);
+  await expect(page.getByText('https://stale.example.com', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('过期网页', { exact: true })).toHaveCount(0);
   expect(writes).toEqual([]);
   await page.setViewportSize({ width: 320, height: 740 });
   expect(
@@ -87,6 +98,7 @@ test("paused automation create, edit and deletion persist through the real Runti
   request,
 }) => {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "活动");
@@ -108,6 +120,7 @@ test("paused automation create, edit and deletion persist through the real Runti
   expect(stored.status).toBe("paused");
   await page.getByRole("button", { name: "详情与运行记录" }).click();
   await page.getByRole("button", { name: "编辑自动化" }).click();
+  await page.getByLabel("重复", { exact: true }).selectOption("custom");
   await page.getByLabel("Cron 表达式").fill("0 10 * * *");
   await page.getByRole("button", { name: "保存自动化" }).click();
   await expect

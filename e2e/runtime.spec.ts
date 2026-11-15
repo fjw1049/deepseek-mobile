@@ -8,6 +8,7 @@ test("mobile uses the real Runtime for chat, replay, interruption, questions and
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("wrong-token");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await expect(page.getByRole("alert")).toBeVisible();

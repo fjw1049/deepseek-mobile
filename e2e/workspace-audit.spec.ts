@@ -2,12 +2,14 @@ import { test, expect, type Page } from "@playwright/test";
 import { navigate } from "./navigation";
 async function workspace(page: Page, tab: string) {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台", exact: true }).click();
   await navigate(page, "新建会话");
   await page.getByRole("button", { name: "创建会话", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await navigate(page, "工作区");
+  await page.getByRole("button", { name: "工具", exact: true }).click();
   await page.getByRole("button", { name: tab, exact: true }).click();
 }
 test("partial Git changes show exact staged and unstaged layers; failed write closes stale confirmation", async ({
@@ -15,9 +17,10 @@ test("partial Git changes show exact staged and unstaged layers; failed write cl
 }) => {
   const scopes: string[] = [],
     writes: string[] = [];
-  await page.route("**/git/changes", (r) =>
+  await page.route("**/git/changes*", (r) =>
     r.fulfill({
       json: {
+        session_only: true,
         files: [{ path: "partial.txt", stage: "partial", status: "modified" }],
         stagedFiles: [
           { path: "partial.txt", stage: "staged", status: "modified" },
@@ -57,10 +60,11 @@ test("partial Git changes show exact staged and unstaged layers; failed write cl
     .click();
   await expect(page.getByText("-unstaged-only", { exact: true })).toBeVisible();
   expect(scopes).toEqual(["staged", "unstaged"]);
+  await page.getByRole("checkbox").first().check();
   await page.getByLabel("提交说明").fill("reviewed content");
-  await page.getByRole("button", { name: "提交暂存区", exact: true }).click();
+  await page.getByRole("button", { name: "提交选中文件", exact: true }).click();
   await page
-    .getByRole("button", { name: "确认提交暂存区", exact: true })
+    .getByRole("button", { name: "确认提交选中文件", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText(/操作结果未确认/)).toBeVisible();

@@ -2,6 +2,7 @@ import { navigate } from "./navigation";
 import { test, expect, type Page } from "@playwright/test";
 async function connect(page: Page) {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await expect(page.getByText("想做点什么？")).toBeVisible();
@@ -62,6 +63,7 @@ test("automation editor persists paused schedule, edits without activating, and 
     page.getByRole("heading", { name: "最近运行记录" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "编辑自动化" }).click();
+  await page.getByLabel("重复", { exact: true }).selectOption("custom");
   await page.getByLabel("Cron 表达式").fill("0 10 * * *");
   await page.getByRole("button", { name: "保存自动化" }).click();
   expect(writes[1].body).toMatchObject({ schedule: "0 10 * * *" });

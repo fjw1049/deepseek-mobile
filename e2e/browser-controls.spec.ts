@@ -5,6 +5,7 @@ test("browser control binds generation and scene; stale input is not replayed an
 }) => {
   let view: any = {
     active: true,
+    image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==',
     owner: "agent",
     generation: 3,
     scene: { scene_id: "scene-a" },
@@ -39,19 +40,23 @@ test("browser control binds generation and scene; stale input is not replayed an
     return r.fulfill({ json: { success: true } });
   });
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台", exact: true }).click();
   await navigate(page, "新建会话");
   await page.getByRole("button", { name: "创建会话", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await navigate(page, "工作区");
+  await page.getByRole("button", { name: "工具", exact: true }).click();
   await page.getByRole("button", { name: "浏览器控制", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "输入文字", exact: true }),
-  ).toBeDisabled();
+  ).toBeHidden();
   await page.getByRole("button", { name: "接管浏览器", exact: true }).click();
   await expect(page.getByText("由你控制", { exact: true })).toBeVisible();
   expect(controls).toEqual([{ owner: "user", generation: 3 }]);
+  await page.getByText("手动操作网页", { exact: true }).click();
+  await page.getByText("输入文字与快捷键", { exact: true }).click();
   await page.getByLabel("向网页输入文字").fill("hello");
   await page.getByRole("button", { name: "输入文字", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("画面已变化");

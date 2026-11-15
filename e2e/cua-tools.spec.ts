@@ -20,6 +20,7 @@ const initial = {
 };
 async function openCua(page: Page) {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page
     .getByLabel("访问令牌", { exact: true })
     .fill("mobile-offline-test");
@@ -31,6 +32,7 @@ async function openCua(page: Page) {
     page.getByRole("textbox", { name: "消息", exact: true }),
   ).toBeVisible();
   await navigate(page, "工作区");
+  await page.getByRole("button", { name: "工具", exact: true }).click();
   await page.getByRole("button", { name: "电脑控制", exact: true }).click();
 }
 test("CUA takeover binds revision and turn; uncertain resume needs explicit review and never replays 409", async ({
@@ -156,7 +158,7 @@ test("CUA discards a frame whose task identity changes and confirms stop explici
   expect(writes).toHaveLength(0);
   await page.getByRole("button", { name: "确认停止电脑任务" }).click();
   await expect(
-    page.getByText("当前没有运行中的电脑任务", { exact: true }),
+    page.getByText("暂无电脑任务", { exact: true }),
   ).toBeVisible();
   expect(writes).toEqual([
     { owner: "stopped", revision: 8, turn_id: "new-turn" },

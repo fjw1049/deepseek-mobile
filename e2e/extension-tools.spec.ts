@@ -2,6 +2,7 @@ import { navigate } from "./navigation";
 import { test, expect, type Page } from "@playwright/test";
 async function settings(page: Page) {
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "设置");
@@ -105,7 +106,7 @@ test("MCP tools use mounted legacy route and partial startup failures remain vis
     });
   });
   await settings(page);
-  await page.getByRole("button", { name: "MCP", exact: true }).click();
+  await page.getByRole("button", { name: "工具连接", exact: true }).click();
   await page.getByRole("button", { name: "读取 MCP 工具" }).click();
   await expect(page.getByText("读取项目文档", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "启动已配置的 MCP" }).click();

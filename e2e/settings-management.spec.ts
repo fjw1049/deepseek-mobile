@@ -35,10 +35,11 @@ test("MCP structured configuration preserves unspecified secrets and saves witho
     return route.fulfill({ json: { ok: true } });
   });
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "设置");
-  await page.getByRole("button", { name: "MCP", exact: true }).click();
+  await page.getByRole("button", { name: "工具连接", exact: true }).click();
   await page.getByText("管理 MCP 配置", { exact: true }).click();
   await page.getByRole("button", { name: "编辑 docs", exact: true }).click();
   await page.getByLabel("配置为启用（重启 Runtime 时可能自动启动）").check();
@@ -96,9 +97,11 @@ test("user skill document is readable and deletion requires explicit action", as
     });
   });
   await page.goto("/");
+  await page.getByText("高级连接（地址与令牌）", { exact: true }).click();
   await page.getByLabel("访问令牌").fill("mobile-offline-test");
   await page.getByRole("button", { name: "连接工作台" }).click();
   await navigate(page, "设置");
+  await page.getByRole("button", { name: "技能", exact: true }).click();
   await page.getByText("管理电脑用户技能", { exact: true }).click();
   await page.getByRole("button", { name: "阅读 Sample" }).click();
   await expect(
