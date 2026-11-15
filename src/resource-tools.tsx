@@ -1,3 +1,5 @@
+import { prioritizeTasks } from "./task-order";
+import { parseSchedule, makeSchedule, localDateInput, type Frequency } from "./automation-schedule";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -94,7 +96,8 @@ export function ResourceTools({
   const raw = Array.isArray(data)
     ? data
     : (data as RecordData | null)?.[resource];
-  const rows = Array.isArray(raw) ? (raw as RecordData[]) : [];
+  const sourceRows = Array.isArray(raw) ? (raw as RecordData[]) : [];
+  const rows = resource === "tasks" ? prioritizeTasks(sourceRows) : sourceRows;
   const [detail, setDetail] = useState<RecordData | null>(null);
   const [conversation, setConversation] = useState<RecordData[] | null>(null);
   const [runs, setRuns] = useState<RecordData[] | null>(null);
@@ -153,11 +156,6 @@ export function ResourceTools({
         {!rows.length && (
           <div className="empty">
             <h2>暂无{resource === "tasks" ? "任务" : "自动化"}</h2>
-            <p>
-              {resource === "tasks"
-                ? "Agent 创建的后台任务会显示在这里。"
-                : "创建定时任务后，由电脑 Runtime 执行。"}
-            </p>
           </div>
         )}
         {rows.map((row) => (
@@ -293,7 +291,7 @@ export function ResourceTools({
               <>
                 <h3>执行过程</h3>
                 {conversation?.length === 0 && (
-                  <p className="muted">这条任务还没有保存执行过程。</p>
+                  <p className="muted">暂无执行记录</p>
                 )}
                 {conversation?.map((block, i) => (
                   <article className="record-card" key={text(block.id) || i}>
@@ -465,7 +463,10 @@ function AutomationForm({
   const [kind, setKind] = useState(
     initial.id && !initial.schedule ? "once" : "cron",
   );
-  const [runAt, setRunAt] = useState(text(initial.next_run_at));
+  const [runAt, setRunAt] = useState(localDateInput(text(initial.next_run_at)));
+  const parsed = parseSchedule(text(initial.schedule) || "0 9 * * *");
+  const [frequency, setFrequency] = useState<Frequency>(parsed.frequency);
+  const [clock, setClock] = useState(parsed.time);
   const [cwds, setCwds] = useState(
     Array.isArray(initial.cwds) ? initial.cwds.map(text).join("\n") : "",
   );
@@ -487,16 +488,18 @@ function AutomationForm({
             .split("\n")
             .map((s) => s.trim())
             .filter(Boolean);
-        if (kind === "cron") body.schedule = schedule.trim();
+        if (kind === "cron") {
+          try { body.schedule = makeSchedule(frequency, clock, schedule); }
+          catch (error) { setLocalError((error as Error).message); return; }
+        }
         else {
           if (
-            !/(Z|[+-]\d{2}:\d{2})$/.test(runAt) ||
-            Number.isNaN(Date.parse(runAt))
+            Number.isNaN(Date.parse(runAt)) || Date.parse(runAt) <= Date.now()
           ) {
-            setLocalError("请输入带时区的时间，例如 2027-01-01T09:00:00+08:00");
+            setLocalError("请选择未来的执行时间");
             return;
           }
-          body.run_at = runAt;
+          body.run_at = new Date(runAt).toISOString();
         }
         save(body);
       }}
@@ -528,7 +531,9 @@ function AutomationForm({
         </select>
       </label>
       {kind === "cron" ? (
-        <label>
+        <>
+        <label>重复<select aria-label="重复" value={frequency} onChange={(e) => setFrequency(e.target.value as Frequency)}><option value="daily">每天</option><option value="weekdays">每个工作日（周一至周五）</option><option value="custom">自定义计划</option></select></label>
+        {frequency !== "custom" ? <label>执行时刻<input type="time" required value={clock} onChange={(e) => setClock(e.target.value)} /></label> : <label>
           Cron 表达式
           <input
             required
@@ -536,18 +541,20 @@ function AutomationForm({
             onChange={(e) => setSchedule(e.target.value)}
           />
           <small>分钟 小时 日期 月份 星期；0 9 * * * 表示每天 09:00。</small>
-        </label>
+        </label>}
+        </>
       ) : (
         <label>
-          执行时间（含时区）
+          执行时间（本机时区）
           <input
             required
-            placeholder="2027-01-01T09:00:00+08:00"
+            type="datetime-local"
             value={runAt}
             onChange={(e) => setRunAt(e.target.value)}
           />
         </label>
       )}
+      <details className="advanced-options"><summary>时区与工作目录</summary>
       <label>
         时区
         <input
@@ -567,9 +574,11 @@ function AutomationForm({
           }
         />
       </label>
+      </details>
+      <p className="muted">{kind === "cron" ? `执行时区：${timezone}` : "按手机当前时区选择时间。"}</p>
       {!initial.id && (
         <p className="muted">
-          保存后默认暂停。检查任务后点“启用”开始调度；执行会消耗电脑上配置的模型额度。
+          保存为暂停状态；启用后按模型用量计费。
         </p>
       )}
       <button
