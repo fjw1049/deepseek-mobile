@@ -15,6 +15,15 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom"],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react-vendor";
+        },
+      },
+    },
+  },
   server: {
     port: 5178,
     strictPort: true,
