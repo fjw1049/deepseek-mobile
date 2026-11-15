@@ -6,6 +6,7 @@ export type Thread = {
   provider: string;
   mode: string;
   archived: boolean;
+  auto_approve?: boolean;
   latest_turn_id?: string | null;
   latest_turn_status?: string;
   activity_waiting?: boolean;
@@ -20,7 +21,7 @@ export type Item = {
   detail?: string | null;
   metadata?: Record<string, unknown> | null;
 };
-export type Turn = { id: string; status: string; error?: string | null };
+export type Turn = { id: string; status: string; error?: string | null; diff_snapshot?: { complete: boolean; files: { path: string }[] } | null };
 export type Detail = {
   thread: Thread;
   items: Item[];

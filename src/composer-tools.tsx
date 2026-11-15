@@ -131,9 +131,11 @@ export function AttachmentList({
 export function CopyButton({
   text,
   label = "复制回复",
+  showLabel = false,
 }: {
   text: string;
   label?: string;
+  showLabel?: boolean;
 }) {
   const [status, setStatus] = useState("");
   return (
@@ -152,7 +154,7 @@ export function CopyButton({
         }}
       >
         <Copy size={14} />
-        {label === "复制代码" ? "复制代码" : null}
+        {showLabel ? "复制" : label === "复制代码" ? "复制代码" : null}
       </button>
       {status && <small role="status">{status}</small>}
     </span>
