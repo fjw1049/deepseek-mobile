@@ -1,4 +1,6 @@
-> 最新深审：移动适配已集中到Runtime的独立mobile包，修复会话竞态与Git首次提交等问题，36项手机回归通过，原生包已更新。[本轮完整记录](docs/deep-audit-20261115.md)。
+> 2026-11-16：修复个人服务误用 250 KB 冒烟输入限制，以及系统失败核验被显示为模型答案的问题。[本次审核与验证边界](docs/chain-audit-20261116.md)。
+
+> 历史深审：移动适配已集中到Runtime的独立mobile包，修复会话竞态与Git首次提交等问题，36项手机回归通过，原生包已更新。[本轮完整记录](docs/deep-audit-20261115.md)。
 
 > 最新：已补齐附件/文档、语音接入、文件/Git/PTY、浏览器与CUA控制、扩展配置、设备配对和原生分享/本地通知。[本轮功能与验收边界](docs/function-audit-20261115.md)。真实模型验收6次通过；电脑预览使用5178，离线回归使用5180/17880。
 
@@ -9,6 +11,14 @@
 当前交付：可运行的移动端主链路、两个原生工程、离线真实 Runtime 联调及 iOS 未签名构建，以及已通过签名校验的 Android 调试 APK 和未签名商店 AAB。**尚未商店上线**；用户尚无 Apple Developer / Google Play 账号。本版本也不等于所有桌面能力均已完成手机适配。
 
 安装包：[Android APK](artifacts/deepseek-mobile-0.1.0-debug.apk) · [未签名 AAB](artifacts/deepseek-mobile-0.1.0-unsigned.aab) · [iOS 未签名构建](artifacts/ios-unsigned-app.zip) · [实际界面截图](screenshots/mobile-chat.png)
+
+## 手机日常使用与自动验收分开
+
+手机的个人服务使用 `scripts/live-preview.py --personal`，没有累计 6/12 次调用限制，按实际模型用量计费；模型固定 `deepseek-flash`，不回退 Pro。原 `live:preview` 仍是有界自动验收入口，不应当作日常服务启动器。
+
+已有服务升级时必须保留原 `--data-dir`，待活动回合结束后停旧进程再启动；这样保留手机配对与会话，不能同时启动两个持有同一数据目录的 Runtime。`--key-config /path/to/config.toml` 可读取电脑已经配置的官方 DeepSeek 密钥，手机不接触上游密钥。当前单次输出上限仍为 1024 tokens；个人服务请求体上限为 16 MiB（包含历史、工具和附件），冒烟验证仍保持 250 KB。此字节保护不替代模型上下文限制。
+
+界面采用对话／任务／项目／设置主导航；首次配对后原生 App 从系统安全存储自动恢复连接。项目工具和设置按需进入，不会在首屏自动启动终端、浏览器或扩展。
 
 ## 电脑直接验证（2026-11-15 更新）
 
