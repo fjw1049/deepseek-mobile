@@ -22,7 +22,7 @@ try {
     case "diff": result = await git.getGitFileDiff({workspaceRoot: root, path: req.path, scope: req.scope ?? "working-tree", untracked: req.untracked === true}); break;
     case "stage": result = await git.stageGitChanges(root, req.paths); break;
     case "unstage": result = await git.unstageGitChanges(root, req.paths); break;
-    case "commit": result = await git.commitGitChanges(root, req.message); break;
+    case "commit": result = await git.commitGitChanges(root, req.message, req.paths); break;
     case "switch": result = await git.switchGitBranch(root, req.branch); break;
     case "createBranch": result = await git.createAndSwitchGitBranch(root, req.branch); break;
     case "pull": result = await git.pullGitBranch(root); break;

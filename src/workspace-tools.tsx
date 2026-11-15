@@ -91,10 +91,10 @@ function FileDiff({
           ))}
         </pre>
       ) : (
-        <p className="muted">该文件没有可显示的文本差异，可能是二进制文件。</p>
+        <p className="muted">无文本差异</p>
       )}
       {file.detail_truncated && (
-        <p className="muted">差异较长，电脑仅返回了部分内容。</p>
+        <p className="muted">差异已截断</p>
       )}
     </details>
   );
@@ -107,12 +107,14 @@ export function WorkspaceTools({
   onError,
   initialTab = "changes",
   compact = false,
+  turnId,
 }: {
   client: RuntimeClient;
   threadId: string;
   onError?: (error: unknown) => void;
   initialTab?: "changes" | "browser";
   compact?: boolean;
+  turnId?: string;
 }) {
   const [tab, setTab] = useState(initialTab);
   const [refresh, setRefresh] = useState(0);
@@ -167,7 +169,7 @@ export function WorkspaceTools({
           setEnvironment(env);
           setTurns(
             detail.turns
-              .filter((turn) => turn.diff_snapshot?.files?.length)
+              .filter((turn) => turn.diff_snapshot?.files?.length && (!turnId || turn.id === turnId))
               .reverse(),
           );
           setConflicts(comparison.files);
@@ -191,7 +193,7 @@ export function WorkspaceTools({
       controller.abort();
     };
     // onError is a notification callback, not a data-loading dependency.
-  }, [client, threadId, tab, refresh]);
+  }, [client, threadId, turnId, tab, refresh]);
   return (
     <section
       aria-label="工作区结果"
@@ -232,10 +234,11 @@ export function WorkspaceTools({
         </div>
       ) : tab === "changes" ? (
         <>
-          {environment && (
+          <p className="muted">{turnId ? "本轮变更" : "会话变更"}</p>
+          {environment && !turnId && (
             <details
               className="record-card environment-details"
-              open={!compact}
+              open={environment.publish_pending || undefined}
             >
               <summary>
                 <Folder size={14} /> 工作区信息
@@ -274,7 +277,7 @@ export function WorkspaceTools({
               )}
             </details>
           )}
-          {conflicts.length > 0 && (
+          {!turnId && conflicts.length > 0 && (
             <section>
               <h3>待选择版本的差异</h3>
               <p className="muted">项目文件 → 任务版本</p>
@@ -286,8 +289,8 @@ export function WorkspaceTools({
           {turns.length === 0 ? (
             <div className="empty">
               <Code2 size={25} />
-              <p>此会话还没有记录文件变更。</p>
-              <p>这里显示每轮任务记录的差异，不代表整个仓库的 Git 状态。</p>
+              <p>暂无文件变更</p>
+
             </div>
           ) : (
             turns.map((turn, turnIndex) => (
@@ -331,7 +334,7 @@ export function WorkspaceTools({
                     ? "已停止"
                     : "由智能体控制"}
               </p>
-              {browser.url && (
+              {browser.active && browser.url && (
                 <p style={{ overflowWrap: "anywhere", marginTop: 10 }}>
                   {browser.url}
                 </p>
@@ -342,7 +345,7 @@ export function WorkspaceTools({
                 {browser.error}
               </p>
             )}
-            {browser.image?.startsWith("data:image/") ? (
+            {browser.active && browser.image?.startsWith("data:image/") ? (
               <figure style={{ margin: "12px 0" }}>
                 <img
                   src={browser.image}
@@ -363,7 +366,7 @@ export function WorkspaceTools({
                 </p>
               </div>
             )}
-            {!!browser.tabs?.length && (
+            {browser.active && !!browser.tabs?.length && (
               <article className="record-card">
                 <h3 style={{ fontSize: 14 }}>已打开的标签页</h3>
                 {browser.tabs.map((item, i) => (

@@ -129,9 +129,6 @@ export function FileTools({
           <RefreshCw size={16} />
         </button>
       </div>
-      <p className="muted">
-        仅当前会话的执行目录。敏感文件、符号链接不显示；单文件上限 8 MiB。
-      </p>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -186,7 +183,7 @@ export function FileTools({
             />
           ) : (
             <p className="empty">
-              此格式不支持文本预览，可保存后使用对应应用打开。
+              暂不支持预览，请保存后打开。
             </p>
           )}
         </article>
@@ -195,7 +192,7 @@ export function FileTools({
         listing && (
           <>
             {!listing.entries.length && (
-              <p className="empty">这个目录没有可访问的文件。</p>
+              <p className="empty">目录为空</p>
             )}
             {listing.entries.map((entry) => (
               <button

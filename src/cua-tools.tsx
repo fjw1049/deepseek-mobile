@@ -216,9 +216,9 @@ export function CuaTools({
         <article className="record-card">
           <h3>
             {!state.active
-              ? "当前没有运行中的电脑任务"
+              ? "暂无电脑任务"
               : !state.available || state.used === false
-                ? "当前会话尚未使用电脑操作"
+                ? "本会话未使用电脑操作"
                 : state.transferring
                   ? "正在交接控制权"
                   : state.owner === "user"
@@ -235,14 +235,14 @@ export function CuaTools({
             </p>
           )}
           {state.awaiting_permission && (
-            <p>电脑操作正在等待权限批准，请查看会话中的审批请求。</p>
+            <p>请在聊天中批准权限。</p>
           )}
           {state.human_reason && (
             <p style={{ whiteSpace: "pre-wrap" }}>{state.human_reason}</p>
           )}
           {state.owner === "user" && (
             <p>
-              接管后请在电脑上操作。完成后点击「交还智能体」。手机端不发送鼠标或键盘输入。
+              请到电脑操作，完成后交还智能体。
             </p>
           )}
           {state.unresolved && (
@@ -252,7 +252,7 @@ export function CuaTools({
                 操作编号：{state.unresolved.call_id}
               </p>
               <p>
-                操作可能已经生效。请查看会话工具记录和电脑实际状态，确认结果后再交还；不会自动重新执行该操作。
+                操作可能已生效。请核对电脑结果后再交还。
               </p>
             </div>
           )}

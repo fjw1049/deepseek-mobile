@@ -194,10 +194,7 @@ export function TerminalTools({
   return (
     <section className="sheet-form" aria-label="电脑终端">
       <h3>电脑终端</h3>
-      <p className="muted">
-        连接当前会话的电脑工作区。关闭面板后进程继续运行；15
-        分钟无客户端操作将自动关闭。
-      </p>
+      <details><summary>终端说明</summary><p className="muted">关闭面板后继续运行，闲置 15 分钟自动关闭。</p></details>
       {loading && <p role="status">正在查询终端…</p>}
       {error && (
         <button

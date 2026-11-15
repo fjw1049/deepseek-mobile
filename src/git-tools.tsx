@@ -7,6 +7,7 @@ type Changes = {
   stagedFiles?: Change[];
   unstagedFiles?: Change[];
   has_hidden_files?: boolean;
+  session_only?: boolean;
 };
 type Branches = {
   currentBranch: string | null;
@@ -29,6 +30,7 @@ export function GitTools({
   client: RuntimeClient;
   threadId: string;
 }) {
+  const [scope, setScope] = useState<"session" | "repository">("session");
   const [changes, setChanges] = useState<Changes | null>(null),
     [branches, setBranches] = useState<Branches | null>(null);
   const [selected, setSelected] = useState<string[]>([]),
@@ -53,7 +55,7 @@ export function GitTools({
     setReview(null);
     void Promise.all([
       client.request<Changes>(
-        `${base}/changes`,
+        `${base}/changes${scope === "session" ? "?session_only=true" : ""}`,
         "GET",
         undefined,
         controller.signal,
@@ -67,6 +69,7 @@ export function GitTools({
     ])
       .then(([c, b]) => {
         if (live) {
+          if (scope === "session" && c.session_only !== true) { setError("电脑服务尚未支持按会话筛选 Git，请更新服务后重试。"); return; }
           setChanges(c);
           setBranches(b);
         }
@@ -81,7 +84,7 @@ export function GitTools({
       live = false;
       controller.abort();
     };
-  }, [client, base, refresh]);
+  }, [client, base, refresh, scope]);
   return (
     <section aria-label="Git 工作区">
       <div className="resource-tabs">
@@ -90,6 +93,8 @@ export function GitTools({
           刷新状态
         </button>
       </div>
+      <label>变更范围<select aria-label="Git 变更范围" value={scope} disabled={busy} onChange={e => setScope(e.target.value as "session" | "repository")}><option value="session">当前会话</option><option value="repository">整个仓库</option></select></label>
+      <p className="muted">{scope === "session" ? "本会话文件的当前变更" : "整个仓库 · 分支与远端操作影响全库"}</p>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -97,7 +102,7 @@ export function GitTools({
       )}
       {notice && <p role="status">{notice}</p>}
       {busy && <p className="muted">正在处理 Git…</p>}
-      {branches && (
+      {branches && scope === "repository" && (
         <article className="record-card">
           <h3>{branches.currentBranch || "分离的 HEAD"}</h3>
           <p className="muted">
@@ -229,7 +234,7 @@ export function GitTools({
                     setError("");
                     try {
                       const result = await client.request<{ patch: string }>(
-                        `${base}/diff?path=${encodeURIComponent(file.path)}&scope=${scope}&untracked=${file.status === "untracked"}`,
+                        `${base}/diff?path=${encodeURIComponent(file.path)}&scope=${scope}&untracked=${file.status === "untracked"}&session_only=${changes.session_only === true}`,
                       );
                       setPatch({
                         path: `${file.path} · ${scope === "staged" ? "已暂存" : "未暂存"}`,
@@ -254,7 +259,7 @@ export function GitTools({
                 setReview({
                   name: "stage",
                   label: "暂存选中文件",
-                  body: { paths: selected },
+                  body: { paths: selected, session_only: scope === "session" },
                   detail: selected.join("\n"),
                 })
               }
@@ -267,7 +272,7 @@ export function GitTools({
                 setReview({
                   name: "unstage",
                   label: "取消暂存",
-                  body: { paths: selected },
+                  body: { paths: selected, session_only: scope === "session" },
                   detail: selected.join("\n"),
                 })
               }
@@ -288,18 +293,18 @@ export function GitTools({
             <div className="actions">
               <button
                 disabled={
-                  busy || !message.trim() || !changes.stagedFiles?.length
+                  busy || !message.trim() || !selected.length
                 }
                 onClick={() =>
                   setReview({
                     name: "commit",
-                    label: "提交暂存区",
-                    body: { message: message.trim() },
-                    detail: `提交说明：${message.trim()}\n将提交全部 ${changes.stagedFiles?.length ?? 0} 个已暂存文件，不自动添加未暂存内容。`,
+                    label: "提交选中文件",
+                    body: { message: message.trim(), paths: selected, session_only: scope === "session" },
+                    detail: `提交说明：${message.trim()}\n仅提交以下文件的当前完整内容（包含未暂存修改），其他已暂存文件不会随此次提交：\n${selected.join("\n")}\n若同一文件还包含其他人的修改，也会一并提交，请先查看差异。`,
                   })
                 }
               >
-                提交暂存区
+                提交选中文件
               </button>
             </div>
           </article>
