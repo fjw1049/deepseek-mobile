@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-15",
+  "mobile_package": "deepseek_tui.mobile",
+  "tests": {
+    "python_mobile_and_runtime": 61,
+    "shared_git_service": 23,
+    "frontend_unit": 25,
+    "mobile_e2e": 36
+  },
+  "builds": {
+    "ios_unsigned": "passed",
+    "android_debug_apk": "passed",
+    "android_unsigned_bundle": "passed"
+  },
+  "embedded_assets_match": {
+    "deepseek-mobile-0.1.0-debug.apk": true,
+    "deepseek-mobile-0.1.0-unsigned.aab": true,
+    "ios": true
+  },
+  "live": {
+    "provider": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "requests": 2,
+    "http200": 2,
+    "cases": [
+      "create desktop project file",
+      "read file from App",
+      "stage and first commit from App"
+    ],
+    "initial_git_failure": "unborn HEAD; fixed in shared Git service and verified without another model call",
+    "workspace": "/Users/fjw/Desktop/Mobile-App-Acceptance-20261115/workspace"
+  },
+  "artifacts": {
+    "deepseek-mobile-0.1.0-debug.apk": {
+      "bytes": 7574188,
+      "sha256": "7e347b29e8bb793ae63496615e3bf685ab961f242e64c56a975f56c0ab422e62"
+    },
+    "deepseek-mobile-0.1.0-unsigned.aab": {
+      "bytes": 3325042,
+      "sha256": "56a8e3e6774e9b9d1be1d545aa271696c2cc7a2fac0cc86aff0eff79b4a71b5d"
+    },
+    "ios-unsigned-app.zip": {
+      "bytes": 963312,
+      "sha256": "c531a2aa528bdf3872507755e9ff58f4c1608a0ccb8ab6b5a62fde3630600155"
+    }
+  },
+  "not_verified": [
+    "physical-device microphone/keyboard/background/security storage/share",
+    "real ASR pending computer credentials",
+    "external MCP/plugin/share/remote Git integrations",
+    "store signing and publication"
+  ]
+}

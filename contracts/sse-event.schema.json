@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepseek-tui.dev/contracts/sse-event.schema.json",
+  "title": "RuntimeThreadEvent",
+  "description": "JSON body inside each SSE data: frame on GET /v1/threads/{id}/events. The Workbench provider reads the redundant top-level event field from this object (not only the SSE event: line).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seq", "timestamp", "thread_id", "event", "payload"],
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic per-runtime event sequence."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp."
+    },
+    "thread_id": {
+      "type": "string",
+      "pattern": "^thr_"
+    },
+    "turn_id": {
+      "type": ["string", "null"],
+      "pattern": "^turn_"
+    },
+    "item_id": {
+      "type": ["string", "null"],
+      "pattern": "^item_"
+    },
+    "event": {
+      "type": "string",
+      "description": "Event name duplicated from the SSE event: field.",
+      "examples": [
+        "thread.started",
+        "turn.lifecycle",
+        "item.started",
+        "item.delta",
+        "item.completed",
+        "item.failed",
+        "approval.required",
+        "user_input.required",
+        "subagent.mailbox",
+        "turn.completed"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-specific payload; shape varies by event name.",
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event": { "const": "approval.required" } }, "required": ["event"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["id", "approval_id", "tool_name"],
+            "properties": {
+              "id": { "type": "string" },
+              "approval_id": { "type": "string" },
+              "tool_name": { "type": "string" },
+              "description": { "type": ["string", "null"] },
+              "input_summary": { "type": ["string", "null"] },
+              "risk_level": { "type": ["string", "null"] },
+              "title": { "type": ["string", "null"] },
+              "impacts": { "type": "array", "items": { "type": "string" } },
+              "primary_preview": { "type": ["string", "null"] },
+              "category": { "type": ["string", "null"] },
+              "risk": { "type": ["string", "null"] },
+              "approval_key": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event": { "const": "user_input.required" } }, "required": ["event"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["id", "request_id", "questions"],
+            "properties": {
+              "id": { "type": "string" },
+              "request_id": { "type": "string" },
+              "questions": { "type": "array" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event": { "const": "turn.diff.updated" } }, "required": ["event"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "description": "TurnDiffSnapshot for the turn's file mutations, folded by path.",
+            "required": ["turn_id", "files", "totals", "revision", "merged_unified_diff", "complete"],
+            "properties": {
+              "turn_id": { "type": "string" },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "Per-file fold of the latest applied mutation.",
+                  "properties": {
+                    "path": { "type": "string" },
+                    "op": { "type": "string", "enum": ["create", "update", "delete", "rename"] },
+                    "additions": { "type": "integer" },
+                    "deletions": { "type": "integer" },
+                    "unified_diff": { "type": "string" },
+                    "detail_truncated": { "type": "boolean" },
+                    "line_start": {
+                      "type": ["integer", "null"],
+                      "minimum": 1,
+                      "description": "1-based line of the first changed line in the NEW file; null when unknown (e.g. deleted files)."
+                    }
+                  }
+                }
+              },
+              "totals": { "type": "object" },
+              "revision": { "type": "integer" },
+              "merged_unified_diff": { "type": "string" },
+              "complete": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event": { "const": "item.completed" } }, "required": ["event"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["item"],
+            "properties": {
+              "item": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": ["object", "null"],
+                    "description": "For file_change items, tool mutation metadata is merged here.",
+                    "properties": {
+                      "mutation": {
+                        "type": "object",
+                        "description": "Single file mutation reported by edit_file / write_file, or detected on disk after a shell command (source shell_detected).",
+                        "properties": {
+                          "path": { "type": "string" },
+                          "op": { "type": "string", "enum": ["create", "update", "delete", "rename"] },
+                          "unified_diff": { "type": "string" },
+                          "additions": { "type": "integer" },
+                          "deletions": { "type": "integer" },
+                          "source": {
+                            "type": "string",
+                            "enum": ["edit_file", "write_file", "shell_allowlist", "shell_detected", "git_reconcile"]
+                          },
+                          "status": { "type": "string" },
+                          "line_start": {
+                            "type": ["integer", "null"],
+                            "minimum": 1,
+                            "description": "1-based line of the first changed line in the NEW file; null when unknown. Clients may open an editor at this location."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
